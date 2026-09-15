@@ -1,0 +1,11 @@
+[wokwi]
+version = 1
+firmware = ".pio/build/heltec_wifi_lora_32_V3/firmware.bin"
+elf = ".pio/build/heltec_wifi_lora_32_V3/firmware.elf"
+
+[[chip]]
+name = 'bmp280'
+# Скомпилировано из bmp280.chip.c командой:
+#   wokwi-cli chip compile bmp280.chip.c -o bmp280.chip.wasm
+# В diagram.json чип используется как "type": "chip-bmp280"
+binary = 'bmp280.chip.wasm'

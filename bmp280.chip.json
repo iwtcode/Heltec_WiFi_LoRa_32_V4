@@ -1,0 +1,6 @@
+{
+  "name": "BMP280",
+  "author": "Custom",
+  "pins": ["", "", "", "", "", "", "SDO", "GND", "SDA", "SCL", "CSB", "VCC"],
+  "controls": []
+}
