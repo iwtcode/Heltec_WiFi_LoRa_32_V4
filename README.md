@@ -59,3 +59,12 @@ wokwi-cli chip compile bmp280.chip.c -o bmp280.chip.wasm
 > Смотреть логи можно через `Serial Monitor` (Ctrl+Alt+S)
 
 ✅ Готово
+
+## 5. Возникают ошибки?
+
+Удаляй:
+- .pio
+- .vscode
+- managed_components
+- sdkconfig.heltec_wifi_lora_32_V3
+- pio run -t clean

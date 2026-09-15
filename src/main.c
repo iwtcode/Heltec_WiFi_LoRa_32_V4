@@ -5,6 +5,7 @@
 #include "driver/i2c.h" 
 #include "driver/gpio.h"
 #include "bmp280.h"
+#include "ssd1306.h" // Подключаем скачанную библиотеку
 
 static const char *TAG = "HELTEC_V4";
 
@@ -20,18 +21,16 @@ static const char *TAG = "HELTEC_V4";
 
 // Функция включения питания платы и сброса экрана
 void heltec_board_init() {
-    // 1. Включаем питание Vext (активируется низким уровнем - 0)
     gpio_reset_pin(VEXT_PIN);
     gpio_set_direction(VEXT_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(VEXT_PIN, 0); 
     vTaskDelay(50 / portTICK_PERIOD_MS);
 
-    // 2. Аппаратный сброс OLED экрана
     gpio_reset_pin(OLED_RST);
     gpio_set_direction(OLED_RST, GPIO_MODE_OUTPUT);
-    gpio_set_level(OLED_RST, 0); // Притягиваем Reset к земле
+    gpio_set_level(OLED_RST, 0); 
     vTaskDelay(50 / portTICK_PERIOD_MS);
-    gpio_set_level(OLED_RST, 1); // Отпускаем Reset
+    gpio_set_level(OLED_RST, 1); 
     vTaskDelay(50 / portTICK_PERIOD_MS);
 }
 
@@ -49,27 +48,6 @@ void i2c_master_init() {
     i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
 }
 
-// Минимальная инициализация SSD1306
-void oled_init() {
-    uint8_t init_cmds[] = {
-        0x00, 0xAE, 0x20, 0x00, 0x21, 0x00, 0x7F, 0x22, 0x00, 0x07, 
-        0x81, 0xCF, 0xA1, 0xA6, 0xA8, 0x3F, 0xC8, 0xD3, 0x00, 0xD5, 
-        0x80, 0xD9, 0xF1, 0xDA, 0x12, 0xDB, 0x40, 0x8D, 0x14, 0xAF
-    };
-    i2c_master_write_to_device(I2C_MASTER_NUM, OLED_ADDR, init_cmds, sizeof(init_cmds), 1000 / portTICK_PERIOD_MS);
-}
-
-// Заливка экрана паттерном
-void oled_fill() {
-    uint8_t data[129];
-    data[0] = 0x40;
-    for(int i=1; i<129; i++) data[i] = 0xFF;
-    
-    for(int page=0; page<8; page++) {
-        i2c_master_write_to_device(I2C_MASTER_NUM, OLED_ADDR, data, sizeof(data), 1000 / portTICK_PERIOD_MS);
-    }
-}
-
 void app_main(void)
 {
     heltec_board_init();
@@ -79,27 +57,48 @@ void app_main(void)
     ESP_LOGI(TAG, "Инициализация I2C...");
     i2c_master_init();
 
-    ESP_LOGI(TAG, "Инициализация OLED...");
-    oled_init();
+    ESP_LOGI(TAG, "Инициализация OLED через библиотеку...");
+    // Передаем библиотеке уже готовый порт I2C и адрес устройства (0x3C)
+    ssd1306_handle_t oled = ssd1306_create(I2C_MASTER_NUM, OLED_ADDR);
     
-    oled_fill();
+    // Очищаем экран (заполняем черным цветом)
+    ssd1306_clear_screen(oled, 0x00);
+    ssd1306_refresh_gram(oled);
 
     ESP_LOGI(TAG, "Инициализация датчика BMP280...");
     esp_err_t bmp_err = bmp280_init(I2C_MASTER_NUM);
     if (bmp_err != ESP_OK) {
-        ESP_LOGW(TAG, "BMP280 не инициализирован (%s). Показания температуры недоступны.",
-                 esp_err_to_name(bmp_err));
+        ESP_LOGW(TAG, "BMP280 не инициализирован (%s)", esp_err_to_name(bmp_err));
+        ssd1306_draw_string(oled, 0, 16, (const uint8_t *)"BMP280 ERROR", 16, 1);
+        ssd1306_refresh_gram(oled);
     }
 
     int counter = 0;
     while (1) {
         float temperature = 0.0f;
-        if (bmp280_read_temperature(I2C_MASTER_NUM, &temperature) == ESP_OK) {
+        if (bmp_err == ESP_OK && bmp280_read_temperature(I2C_MASTER_NUM, &temperature) == ESP_OK) {
             ESP_LOGI(TAG, "Температура (BMP280): %.2f °C | счетчик: %d", temperature, counter);
+            
+            // 1. Очищаем виртуальный буфер дисплея
+            ssd1306_clear_screen(oled, 0x00);
+            
+            // 2. Формируем строки с текстом
+            char temp_str[32];
+            char cnt_str[32];
+            snprintf(temp_str, sizeof(temp_str), "Temp: %.1f C", temperature);
+            snprintf(cnt_str, sizeof(cnt_str), "Count: %d", counter);
+            
+            // 3. Рисуем текст в буфере 
+            // Параметры: хэндл, X, Y, текст, размер шрифта (16), цвет (1 - белый)
+            ssd1306_draw_string(oled, 0, 16, (const uint8_t *)temp_str, 16, 1);
+            ssd1306_draw_string(oled, 0, 40, (const uint8_t *)cnt_str, 16, 1);
+            
+            // 4. Отправляем буфер на физический экран по I2C
+            ssd1306_refresh_gram(oled);
         } else {
-            ESP_LOGW(TAG, "Не удалось прочитать температуру с BMP280 | счетчик: %d", counter);
+            ESP_LOGW(TAG, "Не удалось прочитать температуру | счетчик: %d", counter);
         }
         counter++;
-        vTaskDelay(1000 / portTICK_PERIOD_MS); 
+        vTaskDelay(2000 / portTICK_PERIOD_MS); 
     }
 }
