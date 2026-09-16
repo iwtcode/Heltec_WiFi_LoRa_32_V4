@@ -1,0 +1,19 @@
+{
+  "name": "610 Coreless Motor Fan",
+  "author": "Custom",
+  "pins": ["", "", "", "V", "G", "S"],
+  "controls": [
+    {
+      "id": "maxRpm",
+      "label": "Max RPM",
+      "type": "range",
+      "min": 5000,
+      "max": 45000,
+      "step": 500
+    }
+  ],
+  "display": {
+    "width": 100,
+    "height": 100
+  }
+}

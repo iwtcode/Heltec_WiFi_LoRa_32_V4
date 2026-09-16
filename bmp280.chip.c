@@ -11,7 +11,13 @@
 //
 // Благодаря этому одна и та же прошивка ESP-IDF, работающая с реальным
 // датчиком BMP280 по стандартному протоколу, без изменений работает и с
-// этой симуляцией. Температура случайно "блуждает" в заданном диапазоне.
+// этой симуляцией.
+//
+// Температура НЕ меняется случайно: она управляется вручную — кликните на
+// сам чип в Wokwi, откроется панель со слайдером "Temperature (°C)", и её
+// можно менять мышкой прямо во время симуляции. Значение слайдера — это
+// control "temperature" из bmp280.chip.json, привязанный к одноимённому
+// атрибуту через Attributes API.
 
 #include "wokwi-api.h"
 #include <stdio.h>
@@ -33,6 +39,13 @@
 #define REG_TEMP_MSB     0xFA
 #define REG_CALIB_T1_LSB 0x88
 
+// Значение слайдера "Temperature (°C)" по умолчанию.
+#define DEFAULT_TEMPERATURE 25.0f
+
+// Как часто чип перечитывает положение слайдера и обновляет регистры
+// данных. Настраивается атрибутом updateIntervalMs в diagram.json.
+#define DEFAULT_UPDATE_INTERVAL_MS 100
+
 typedef struct {
   pin_t pin_scl;
   pin_t pin_sda;
@@ -47,8 +60,7 @@ typedef struct {
   uint8_t reg_ptr;
   bool reg_ptr_set;
 
-  uint32_t attr_min_temp;
-  uint32_t attr_max_temp;
+  uint32_t attr_temperature; // control "temperature" (слайдер)
   uint32_t attr_interval;
 
   float current_temp;
@@ -103,14 +115,13 @@ void chip_init(void) {
   chip->regs[REG_CTRL_MEAS] = 0x00;
   chip->regs[REG_CONFIG] = 0x00;
 
-  // Настраиваемые через diagram.json параметры симуляции
-  chip->attr_min_temp = attr_init_float("minTemperature", 18.0f);
-  chip->attr_max_temp = attr_init_float("maxTemperature", 30.0f);
-  chip->attr_interval = attr_init("updateIntervalMs", 2000);
+  // "temperature" — это control-слайдер (см. bmp280.chip.json), его же
+  // значение читаем через Attributes API. Никакого случайного блуждания
+  // больше нет — чип просто всегда показывает то, что выставлено слайдером.
+  chip->attr_temperature = attr_init_float("temperature", DEFAULT_TEMPERATURE);
+  chip->attr_interval = attr_init("updateIntervalMs", DEFAULT_UPDATE_INTERVAL_MS);
 
-  float min_t = attr_read_float(chip->attr_min_temp);
-  float max_t = attr_read_float(chip->attr_max_temp);
-  chip->current_temp = (min_t + max_t) / 2.0f;
+  chip->current_temp = attr_read_float(chip->attr_temperature);
   write_temperature(chip, chip->current_temp);
 
   // Адрес на шине I2C: SDO->GND = 0x76 (используется по умолчанию, как и
@@ -130,44 +141,29 @@ void chip_init(void) {
   };
   chip->i2c = i2c_init(&i2c_config);
 
-  srand((unsigned int)get_sim_nanos());
-
   const timer_config_t timer_config = {
     .callback = on_timer,
     .user_data = chip,
   };
   chip->timer = timer_init(&timer_config);
   uint32_t interval_ms = attr_read(chip->attr_interval);
-  if (interval_ms < 100) interval_ms = 100;
+  if (interval_ms < 20) interval_ms = 20;
   timer_start(chip->timer, interval_ms * 1000, true);
 
-  printf("BMP280 (симуляция): I2C адрес 0x%02X, диапазон %.1f..%.1f C, интервал %u мс\n",
-         address, min_t, max_t, interval_ms);
+  printf("BMP280 (симуляция): I2C адрес 0x%02X, температура управляется слайдером, старт %.1f C\n",
+         address, chip->current_temp);
 }
 
+// Периодически перечитывает положение слайдера "temperature" и, если оно
+// изменилось (пользователь подвигал мышкой), обновляет регистры данных.
 static void on_timer(void *user_data) {
   chip_state_t *chip = (chip_state_t *)user_data;
 
-  float min_t = attr_read_float(chip->attr_min_temp);
-  float max_t = attr_read_float(chip->attr_max_temp);
-  if (max_t < min_t) {
-    float tmp = min_t;
-    min_t = max_t;
-    max_t = tmp;
+  float t = attr_read_float(chip->attr_temperature);
+  if (t != chip->current_temp) {
+    chip->current_temp = t;
+    write_temperature(chip, t);
   }
-
-  // Случайное "блуждание" температуры в заданных пределах — выглядит
-  // правдоподобнее, чем полностью произвольное значение на каждом шаге.
-  float range = max_t - min_t;
-  float step = range * 0.05f + 0.05f;
-  float delta = ((float)(rand() % 2001 - 1000) / 1000.0f) * step;
-
-  float new_temp = chip->current_temp + delta;
-  if (new_temp < min_t) new_temp = min_t;
-  if (new_temp > max_t) new_temp = max_t;
-
-  chip->current_temp = new_temp;
-  write_temperature(chip, new_temp);
 }
 
 static bool on_i2c_connect(void *user_data, uint32_t address, bool connect) {

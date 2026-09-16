@@ -11,9 +11,18 @@
       "top": 240,
       "left": 40,
       "attrs": {
-        "minTemperature": "18",
-        "maxTemperature": "30",
-        "updateIntervalMs": "2000"
+        "temperature": "25",
+        "updateIntervalMs": "100"
+      }
+    },
+    {
+      "type": "chip-610-coreless-motor-fan",
+      "id": "fan",
+      "top": 89,
+      "left": 40,
+      "attrs": {
+        "maxRpm": "45000",
+        "smoothingMs": "250"
       }
     }
   ],
@@ -28,6 +37,10 @@
     [ "esp:18", "bmp280:SCL", "blue", [ "h-60", "*", "h50" ] ],
     [ "esp:17", "bmp280:SDA", "green", [ "h-65", "*", "h60" ] ],
     [ "esp:GND.2", "bmp280:GND", "black", [ "h-70", "*", "h70" ] ],
-    [ "esp:GND.2", "bmp280:SDO", "black", [ "h-75", "*", "h80" ] ]
+    [ "esp:GND.2", "bmp280:SDO", "black", [ "h-75", "*", "h80" ] ],
+
+    [ "esp:3V3.1", "fan:V", "red", [ "h-80", "*", "h20" ] ],
+    [ "esp:GND.3", "fan:G", "black", [ "h-85", "*", "h20" ] ],
+    [ "esp:4", "fan:S", "orange", [ "h-90", "*", "h40" ] ]
   ]
 }

@@ -2,5 +2,14 @@
   "name": "BMP280",
   "author": "Custom",
   "pins": ["", "", "", "", "", "", "SDO", "GND", "SDA", "SCL", "CSB", "VCC"],
-  "controls": []
+  "controls": [
+    {
+      "id": "temperature",
+      "label": "Temperature (°C)",
+      "type": "range",
+      "min": 15,
+      "max": 35,
+      "step": 0.1
+    }
+  ]
 }
