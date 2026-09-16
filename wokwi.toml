@@ -11,8 +11,8 @@ name = 'bmp280'
 binary = 'bmp280.chip.wasm'
 
 [[chip]]
-name = '610-coreless-motor-fan'
-# Скомпилировано из 610_coreless_motor_fan.chip.c командой:
-#   wokwi-cli chip compile 610_coreless_motor_fan.chip.c -o 610_coreless_motor_fan.chip.wasm
-# В diagram.json чип используется как "type": "chip-610-coreless-motor-fan"
-binary = '610_coreless_motor_fan.chip.wasm'
+name = 'motor610'
+# Скомпилировано из motor610.chip.c командой:
+#   wokwi-cli chip compile motor610.chip.c -o motor610.chip.wasm
+# В diagram.json чип используется как "type": "chip-motor610"
+binary = 'motor610.chip.wasm'

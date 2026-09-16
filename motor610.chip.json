@@ -1,5 +1,5 @@
 {
-  "name": "610 Coreless Motor Fan",
+  "name": "motor610",
   "author": "Custom",
   "pins": ["", "", "", "V", "G", "S"],
   "controls": [

@@ -16,7 +16,7 @@
       }
     },
     {
-      "type": "chip-610-coreless-motor-fan",
+      "type": "chip-motor610",
       "id": "fan",
       "top": 89,
       "left": 40,

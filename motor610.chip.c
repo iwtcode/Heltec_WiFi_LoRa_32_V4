@@ -1,5 +1,5 @@
 // Wokwi Custom Chip — симуляционная модель бесколлекторного вентилятора
-// "610 coreless motor fan" (см. 610_coreless_motor_fan.md).
+// "motor610" (см. motor610.md).
 // Docs: https://docs.wokwi.com/chips-api/getting-started
 //
 // Пины модуля (согласно шелкографии реального модуля):
@@ -24,7 +24,7 @@
 // "Max RPM", и её можно менять мышкой прямо во время
 // симуляции — точно так же, как слайдер "Temperature (°C)" у BMP280.
 // Значение слайдера — это control "maxRpm" из
-// 610_coreless_motor_fan.chip.json, привязанный к одноимённому атрибуту
+// motor610.chip.json, привязанный к одноимённому атрибуту
 // через Attributes API.
 
 #include "wokwi-api.h"
@@ -38,7 +38,7 @@
 // Обороты холостого хода реального модуля (см. документацию) — верхняя
 // граница диапазона по умолчанию, пока слайдер не подвинут.
 // Настраивается через атрибут/слайдер maxRpm в diagram.json /
-// 610_coreless_motor_fan.chip.json.
+// motor610.chip.json.
 #define DEFAULT_MAX_RPM 45000.0f
 
 // Постоянная времени сглаживания (инерция вращения ротора), мс.
@@ -116,7 +116,7 @@ void chip_init(void) {
   chip->pin_g = pin_init("G", INPUT);
   chip->pin_s = pin_init("S", INPUT);
 
-  // "maxRpm" — это control-слайдер (см. 610_coreless_motor_fan.chip.json),
+  // "maxRpm" — это control-слайдер (см. motor610.chip.json),
   // его же значение читаем через Attributes API. Сохраняем id атрибута,
   // чтобы периодически перечитывать текущее положение слайдера в
   // on_anim_timer() — не только один раз при старте.
@@ -160,7 +160,7 @@ void chip_init(void) {
 
   render_frame(chip, chip->duty_smooth);
 
-  printf("610 coreless motor fan (симуляция): maxRpm=%.0f, сглаживание=%.0f мс, пин сигнала S\n",
+  printf("motor610 coreless motor fan (симуляция): maxRpm=%.0f, сглаживание=%.0f мс, пин сигнала S\n",
          chip->max_rpm, smoothing_ms);
 }
 

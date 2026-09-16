@@ -4,8 +4,8 @@
 #include "esp_log.h"
 #include "driver/i2c.h"
 #include "driver/gpio.h"
-#include "driver/ledc.h"
 #include "bmp280.h"
+#include "motor610.h"
 #include "ssd1306.h" // Подключаем скачанную библиотеку
 
 static const char *TAG = "HELTEC_V4";
@@ -19,25 +19,6 @@ static const char *TAG = "HELTEC_V4";
 // Специфичные пины платы Heltec V3/V4
 #define VEXT_PIN GPIO_NUM_36
 #define OLED_RST GPIO_NUM_21
-
-// --- Вентилятор 610 (coreless motor fan), см. 610_coreless_motor_fan.md ---
-// Пин S модуля подключаем к любому ШИМ-способному цифровому пину.
-#define FAN_PWM_PIN      GPIO_NUM_4
-#define FAN_LEDC_TIMER   LEDC_TIMER_0
-#define FAN_LEDC_MODE    LEDC_LOW_SPEED_MODE   // на ESP32-S3 доступен только low-speed режим LEDC
-#define FAN_LEDC_CHANNEL LEDC_CHANNEL_0
-#define FAN_LEDC_RES     LEDC_TIMER_10_BIT     // разрешение ШИМ: 0..1023
-#define FAN_LEDC_FREQ_HZ 5000
-
-#define FAN_MAX_DUTY     ((1 << 10) - 1) // соответствует FAN_LEDC_RES (10 бит)
-
-// Логика зависимости скорости от температуры (см. задание):
-//   temp <= FAN_TEMP_OFF  -> вентилятор выключен (0 об/мин)
-//   temp >= FAN_TEMP_MAX  -> максимальная скорость (FAN_MAX_RPM)
-//   между ними            -> линейная интерполяция
-#define FAN_TEMP_OFF  22.0f
-#define FAN_TEMP_MAX  30.0f
-#define FAN_MAX_RPM   45000.0f // паспортная скорость холостого хода модуля 610
 
 // Функция включения питания платы и сброса экрана
 void heltec_board_init() {
@@ -68,55 +49,6 @@ void i2c_master_init() {
     i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
 }
 
-// Инициализация аппаратного ШИМ (LEDC) для управления вентилятором.
-// Пин S модуля 610 подключается к MOSFET-драйверу на самом модуле, поэтому
-// с цифрового пина ESP32 достаточно обычного ШИМ-сигнала небольшой мощности.
-void fan_pwm_init() {
-    ledc_timer_config_t timer_conf = {
-        .speed_mode = FAN_LEDC_MODE,
-        .duty_resolution = FAN_LEDC_RES,
-        .timer_num = FAN_LEDC_TIMER,
-        .freq_hz = FAN_LEDC_FREQ_HZ,
-        .clk_cfg = LEDC_AUTO_CLK,
-    };
-    ledc_timer_config(&timer_conf);
-
-    ledc_channel_config_t channel_conf = {
-        .gpio_num = FAN_PWM_PIN,
-        .speed_mode = FAN_LEDC_MODE,
-        .channel = FAN_LEDC_CHANNEL,
-        .timer_sel = FAN_LEDC_TIMER,
-        .duty = 0,
-        .hpoint = 0,
-    };
-    ledc_channel_config(&channel_conf);
-}
-
-// Пересчитывает температуру (°C) в целевую скорость вентилятора (об/мин):
-// 22°C и ниже — выключен, 30°C и выше — максимум, между ними — линейно.
-float fan_target_rpm_for_temp(float temp_c) {
-    if (temp_c <= FAN_TEMP_OFF) {
-        return 0.0f;
-    }
-    if (temp_c >= FAN_TEMP_MAX) {
-        return FAN_MAX_RPM;
-    }
-    float fraction = (temp_c - FAN_TEMP_OFF) / (FAN_TEMP_MAX - FAN_TEMP_OFF);
-    return FAN_MAX_RPM * fraction;
-}
-
-// Устанавливает скважность ШИМ на пине S по целевым оборотам (0..FAN_MAX_RPM).
-void fan_set_rpm(float target_rpm) {
-    if (target_rpm < 0.0f) target_rpm = 0.0f;
-    if (target_rpm > FAN_MAX_RPM) target_rpm = FAN_MAX_RPM;
-
-    float fraction = target_rpm / FAN_MAX_RPM;
-    uint32_t duty = (uint32_t)(fraction * FAN_MAX_DUTY + 0.5f);
-
-    ledc_set_duty(FAN_LEDC_MODE, FAN_LEDC_CHANNEL, duty);
-    ledc_update_duty(FAN_LEDC_MODE, FAN_LEDC_CHANNEL);
-}
-
 void app_main(void)
 {
     heltec_board_init();
@@ -142,16 +74,16 @@ void app_main(void)
         ssd1306_refresh_gram(oled);
     }
 
-    ESP_LOGI(TAG, "Инициализация ШИМ вентилятора (пин %d)...", FAN_PWM_PIN);
-    fan_pwm_init();
-    fan_set_rpm(0.0f); // на старте вентилятор выключен
+    ESP_LOGI(TAG, "Инициализация ШИМ вентилятора motor610 (пин %d)...", MOTOR610_PWM_PIN);
+    motor610_init();
+    motor610_set_rpm(0.0f); // на старте вентилятор выключен
 
     int counter = 0;
     while (1) {
         float temperature = 0.0f;
         if (bmp_err == ESP_OK && bmp280_read_temperature(I2C_MASTER_NUM, &temperature) == ESP_OK) {
-            float target_rpm = fan_target_rpm_for_temp(temperature);
-            fan_set_rpm(target_rpm);
+            float target_rpm = motor610_target_rpm_for_temp(temperature);
+            motor610_set_rpm(target_rpm);
 
             ESP_LOGI(TAG, "Температура: %.2f °C | Вентилятор: %.0f об/мин | счетчик: %d",
                      temperature, target_rpm, counter);
@@ -179,6 +111,6 @@ void app_main(void)
             ESP_LOGW(TAG, "Не удалось прочитать температуру | счетчик: %d", counter);
         }
         counter++;
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
