@@ -1,7 +1,7 @@
 # 📟 Heltec WiFi LoRa 32 V4 — BMP280 + OLED + вентилятор
 
 <p align="center">
-  <img src="images/wokwi_diagram.png" alt="Heltec WiFi LoRa 32 V4" width="40%" />
+  <img src="images/wokwi_diagram.png" alt="Heltec WiFi LoRa 32 V4" width="50%" />
 </p>
 
 <p align="center">
