@@ -35,8 +35,15 @@ static const char *TAG = "HELTEC_V4";
 #define RPM_LIMIT_MIN 5000.0f
 #define RPM_LIMIT_MAX 45000.0f
 
+// Переменные для встроенных файлов
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+
+extern const uint8_t style_css_start[]  asm("_binary_style_css_start");
+extern const uint8_t style_css_end[]    asm("_binary_style_css_end");
+
+extern const uint8_t script_js_start[]  asm("_binary_script_js_start");
+extern const uint8_t script_js_end[]    asm("_binary_script_js_end");
 
 // Глобальные переменные
 static volatile float g_current_temp = 0.0f;
@@ -145,7 +152,22 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 
 static esp_err_t get_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, (const char *)index_html_start, index_html_end - index_html_start);
+    // Вычитаем 1, чтобы отсечь нулевой терминатор (\0)
+    httpd_resp_send(req, (const char *)index_html_start, (index_html_end - index_html_start) - 1);
+    return ESP_OK;
+}
+
+static esp_err_t style_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/css");
+    // Вычитаем 1, чтобы отсечь нулевой терминатор (\0)
+    httpd_resp_send(req, (const char *)style_css_start, (style_css_end - style_css_start) - 1);
+    return ESP_OK;
+}
+
+static esp_err_t script_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/javascript");
+    // Вычитаем 1, чтобы отсечь нулевой терминатор (\0)
+    httpd_resp_send(req, (const char *)script_js_start, (script_js_end - script_js_start) - 1);
     return ESP_OK;
 }
 
@@ -188,6 +210,12 @@ void wifi_ap_init_and_start_webserver(void) {
         httpd_uri_t uri_get = { .uri = "/", .method = HTTP_GET, .handler = get_handler };
         httpd_register_uri_handler(g_server, &uri_get);
 
+        httpd_uri_t uri_style = { .uri = "/style.css", .method = HTTP_GET, .handler = style_handler };
+        httpd_register_uri_handler(g_server, &uri_style);
+
+        httpd_uri_t uri_script = { .uri = "/script.js", .method = HTTP_GET, .handler = script_handler };
+        httpd_register_uri_handler(g_server, &uri_script);
+
         httpd_uri_t uri_ws = {
             .uri = "/ws",
             .method = HTTP_GET,
@@ -213,7 +241,7 @@ static void bmp280_task(void *pvParameters) {
                 g_bmp_ok = false;
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 }
 
@@ -252,7 +280,7 @@ static void motor_task(void *pvParameters) {
                        
         TickType_t now = xTaskGetTickCount();
         
-        if (changed || (now - last_broadcast > pdMS_TO_TICKS(1000))) {
+        if (changed || (now - last_broadcast > 1000 / portTICK_PERIOD_MS)) {
             last_b_temp = g_current_temp;
             last_b_rpm = g_current_rpm;
             last_b_max = motor610_max_rpm;
@@ -264,7 +292,7 @@ static void motor_task(void *pvParameters) {
             if (g_server) httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 }
 
@@ -289,7 +317,7 @@ static void oled_task(void *pvParameters) {
             }
             ssd1306_refresh_gram(oled);
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 }
 
@@ -304,7 +332,7 @@ void app_main(void)
 
     motor610_init();
 
-    xTaskCreate(bmp280_task, "bmp", 4096, NULL, 5, NULL);
-    xTaskCreate(motor_task,  "mot", 4096, NULL, 5, NULL);
-    xTaskCreate(oled_task,   "oled",4096, oled, 5, NULL);
+    xTaskCreate(bmp280_task, "bmp", 2048, NULL, 5, NULL);
+    xTaskCreate(motor_task,  "mot", 2048, NULL, 5, NULL);
+    xTaskCreate(oled_task,   "oled",2048, oled, 5, NULL);
 }

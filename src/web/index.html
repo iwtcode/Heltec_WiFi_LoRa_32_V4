@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Smart Fan Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>Fan Control</h1>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <button id="themeToggle" class="theme-btn" title="Переключить тему">☀️</button>
+        <div class="status-badge"><div class="dot offline" id="statusDot"></div><span id="statusText">Офлайн</span></div>
+      </div>
+    </header>
+
+    <div class="power-card">
+      <div class="power-info">
+        <div class="label">Питание мотора</div>
+        <div class="state" id="powerStateText">Загрузка...</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="powerToggle">
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <div class="grid">
+      <div class="stat-card temp">
+        <div class="glow-circle"></div>
+        <span class="icon">🌡️</span>
+        <div class="title">Температура</div>
+        <div><span class="value" id="tempVal">--</span><span class="unit">°C</span></div>
+      </div>
+      <div class="stat-card rpm">
+        <div class="glow-circle"></div>
+        <span class="icon"><span id="fanIcon" class="fan-spin">🌀</span></span>
+        <div class="title">Скорость</div>
+        <div><span class="value" id="rpmVal">--</span><span class="unit">RPM</span></div>
+      </div>
+    </div>
+
+    <div class="control-panel">
+      <div class="control-header">
+        <div class="title">Диапазон температур</div>
+        <div><span class="val" id="tempRangeVal">22 - 30</span><span class="unit"> °C</span></div>
+      </div>
+      <div class="range-slider temp-slider">
+        <div class="track"></div>
+        <div class="fill" id="tempSliderFill"></div>
+        <input type="range" id="tempMinSlider" min="10" max="50" step="1" value="22">
+        <input type="range" id="tempMaxSlider" min="10" max="50" step="1" value="30">
+      </div>
+      <div class="range-labels"><span>10 °C</span><span>50 °C</span></div>
+    </div>
+
+    <div class="control-panel" style="margin-top: 16px;">
+      <div class="control-header">
+        <div class="title">Лимит оборотов</div>
+        <div><span class="val" id="limitVal">--</span><span class="unit"> RPM</span></div>
+      </div>
+      <input type="range" id="rpmSlider" class="single" min="5000" max="45000" step="100" value="45000">
+      <div class="range-labels"><span>5 000</span><span>45 000</span></div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
