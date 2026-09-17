@@ -42,6 +42,7 @@ extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
 static volatile float g_current_temp = 0.0f;
 static volatile float g_current_rpm  = 0.0f;
 static volatile bool  g_bmp_ok       = false;
+static volatile bool  g_fan_power    = true; // Состояние питания вентилятора
 
 // Глобальный хендл веб-сервера для широковещательной рассылки WS
 static httpd_handle_t g_server = NULL;
@@ -71,15 +72,14 @@ void i2c_master_init() {
 // ==========================================
 // WebSockets Асинхронная рассылка
 // ==========================================
-// Функция выполняется в контексте потока HTTP-сервера, собирает данные 
-// и отправляет всем подключенным по WS клиентам
 static void broadcast_ws_data_work(void *arg) {
     if (!g_server) return;
 
-    char buf[128];
+    char buf[256];
+    // Добавили поля min и max температуры
     int len = snprintf(buf, sizeof(buf),
-        "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f}",
-        motor610_max_rpm, g_current_rpm, g_current_temp);
+        "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f}",
+        motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max);
 
     httpd_ws_frame_t ws_pkt = {
         .payload = (uint8_t*)buf,
@@ -99,11 +99,8 @@ static void broadcast_ws_data_work(void *arg) {
     }
 }
 
-// Обработчик WebSocket эндпоинта /ws
 static esp_err_t ws_handler(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
-        // Первичное рукопожатие, сразу после подключения ставим в очередь задачу 
-        // отправить новому клиенту свежие данные.
         httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
         return ESP_OK;
     }
@@ -118,22 +115,34 @@ static esp_err_t ws_handler(httpd_req_t *req) {
     if (ret != ESP_OK) return ret;
 
     if (ws_pkt.len > 0) {
-        // Парсим текстовую команду от ползунка браузера, например "rpm:25000"
+        // Парсим команду лимита RPM
         if (strncmp((char*)ws_pkt.payload, "rpm:", 4) == 0) {
             float new_rpm = atof((char*)ws_pkt.payload + 4);
             if (new_rpm < RPM_LIMIT_MIN) new_rpm = RPM_LIMIT_MIN;
             if (new_rpm > RPM_LIMIT_MAX) new_rpm = RPM_LIMIT_MAX;
-            
             motor610_max_rpm = new_rpm;
-
-            // Немедленно уведомляем всех остальных о новом лимите
             httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
+        }
+        // Парсим команду питания (1 - ВКЛ, 0 - ВЫКЛ)
+        else if (strncmp((char*)ws_pkt.payload, "power:", 6) == 0) {
+            int pwr = atoi((char*)ws_pkt.payload + 6);
+            g_fan_power = (pwr > 0);
+            httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
+        }
+        // Парсим команду диапазона температур
+        else if (strncmp((char*)ws_pkt.payload, "temp_range:", 11) == 0) {
+            float t_min, t_max;
+            if (sscanf((char*)ws_pkt.payload + 11, "%f,%f", &t_min, &t_max) == 2) {
+                if (t_min >= t_max) t_min = t_max - 1.0f; // Защита от пересечения
+                motor610_temp_min = t_min;
+                motor610_temp_max = t_max;
+                httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
+            }
         }
     }
     return ESP_OK;
 }
 
-// Отдача главной HTML-страницы
 static esp_err_t get_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, (const char *)index_html_start, index_html_end - index_html_start);
@@ -183,7 +192,7 @@ void wifi_ap_init_and_start_webserver(void) {
             .uri = "/ws",
             .method = HTTP_GET,
             .handler = ws_handler,
-            .is_websocket = true // ВАЖНО: флаг поддержки WS
+            .is_websocket = true
         };
         httpd_register_uri_handler(g_server, &uri_ws);
         ESP_LOGI(TAG, "Web-сервер и WebSocket запущены");
@@ -212,11 +221,17 @@ static void motor_task(void *pvParameters) {
     float last_b_temp = -1.0f;
     float last_b_rpm = -1.0f;
     float last_b_max = -1.0f;
+    float last_b_tmin = -1.0f;
+    float last_b_tmax = -1.0f;
+    bool  last_b_power = !g_fan_power; // Для принудительной первой отправки
     TickType_t last_broadcast = 0;
 
     while (1) {
         if (g_bmp_ok) {
             float target_rpm = motor610_target_rpm_for_temp(g_current_temp);
+            // Если выключено - принудительно 0
+            if (!g_fan_power) target_rpm = 0.0f;
+            
             motor610_set_rpm(target_rpm);
             g_current_rpm = target_rpm;
         } else {
@@ -224,25 +239,28 @@ static void motor_task(void *pvParameters) {
             g_current_rpm = 0.0f;
         }
 
-        // --- УМНАЯ РАССЫЛКА ДАННЫХ WS (Push Events) ---
+        // --- УМНАЯ РАССЫЛКА ДАННЫХ WS ---
         float diff_temp = g_current_temp - last_b_temp;
         float diff_rpm = g_current_rpm - last_b_rpm;
         
-        // Отправляем данные только если они существенно изменились
         bool changed = (diff_temp < -0.05f || diff_temp > 0.05f) ||
                        (diff_rpm < -1.0f || diff_rpm > 1.0f) ||
-                       (motor610_max_rpm != last_b_max);
+                       (motor610_max_rpm != last_b_max) ||
+                       (g_fan_power != last_b_power) ||
+                       (motor610_temp_min != last_b_tmin) ||
+                       (motor610_temp_max != last_b_tmax); 
                        
         TickType_t now = xTaskGetTickCount();
         
-        // Или если прошла 1 секунда (Keep-Alive для спокойствия фронтенда)
         if (changed || (now - last_broadcast > pdMS_TO_TICKS(1000))) {
             last_b_temp = g_current_temp;
             last_b_rpm = g_current_rpm;
             last_b_max = motor610_max_rpm;
+            last_b_tmin = motor610_temp_min;
+            last_b_tmax = motor610_temp_max;
+            last_b_power = g_fan_power;
             last_broadcast = now;
             
-            // Мгновенно ставим задачу на рассылку для потока Web-сервера
             if (g_server) httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
         }
 
@@ -256,13 +274,16 @@ static void oled_task(void *pvParameters) {
         if (oled != NULL) {
             ssd1306_clear_screen(oled, 0x00);
             if (g_bmp_ok) {
-                char t_str[32], r_str[32], m_str[32];
+                char t_str[32], r_str[32], m_str[32], p_str[32];
                 snprintf(t_str, sizeof(t_str), "Temp: %.1f C", g_current_temp);
-                snprintf(r_str, sizeof(r_str), "Fan: %.0f RPM", g_current_rpm);
-                snprintf(m_str, sizeof(m_str), "Max: %.0f RPM", motor610_max_rpm);
+                snprintf(r_str, sizeof(r_str), "Fan: %.0f", g_current_rpm);
+                snprintf(m_str, sizeof(m_str), "Max: %.0f", motor610_max_rpm);
+                snprintf(p_str, sizeof(p_str), "PWR: %s", g_fan_power ? "ON" : "OFF");
+                
                 ssd1306_draw_string(oled, 0, 0, (const uint8_t *)t_str, 16, 1);
-                ssd1306_draw_string(oled, 0, 20, (const uint8_t *)r_str, 16, 1);
-                ssd1306_draw_string(oled, 0, 40, (const uint8_t *)m_str, 16, 1);
+                ssd1306_draw_string(oled, 0, 16, (const uint8_t *)r_str, 16, 1);
+                ssd1306_draw_string(oled, 0, 32, (const uint8_t *)m_str, 16, 1);
+                ssd1306_draw_string(oled, 0, 48, (const uint8_t *)p_str, 16, 1);
             } else {
                 ssd1306_draw_string(oled, 0, 16, (const uint8_t *)"BMP ERROR", 16, 1);
             }

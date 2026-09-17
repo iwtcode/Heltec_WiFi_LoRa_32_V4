@@ -19,8 +19,8 @@ extern "C" {
 #define MOTOR610_MAX_DUTY     ((1 << 10) - 1)
 
 // Логика зависимости скорости от температуры:
-#define MOTOR610_TEMP_OFF  22.0f
-#define MOTOR610_TEMP_MAX  30.0f
+extern float motor610_temp_min;
+extern float motor610_temp_max;
 
 // Теперь это не макрос, а глобальная переменная, которую можно менять через Wi-Fi
 extern float motor610_max_rpm;

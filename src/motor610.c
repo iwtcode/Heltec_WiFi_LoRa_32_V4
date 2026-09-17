@@ -6,6 +6,10 @@
 // Текущий пользовательский лимит
 float motor610_max_rpm = MOTOR610_PHYSICAL_MAX_RPM;
 
+// Диапазон температур
+float motor610_temp_min = 22.0f;
+float motor610_temp_max = 30.0f;
+
 void motor610_init(void)
 {
     ledc_timer_config_t timer_conf = {
@@ -30,13 +34,13 @@ void motor610_init(void)
 
 float motor610_target_rpm_for_temp(float temp_c)
 {
-    if (temp_c <= MOTOR610_TEMP_OFF) {
+    if (temp_c <= motor610_temp_min) {
         return 0.0f;
     }
-    if (temp_c >= MOTOR610_TEMP_MAX) {
+    if (temp_c >= motor610_temp_max) {
         return motor610_max_rpm;
     }
-    float fraction = (temp_c - MOTOR610_TEMP_OFF) / (MOTOR610_TEMP_MAX - MOTOR610_TEMP_OFF);
+    float fraction = (temp_c - motor610_temp_min) / (motor610_temp_max - motor610_temp_min);
     return motor610_max_rpm * fraction;
 }
 
