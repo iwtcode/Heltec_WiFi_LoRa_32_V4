@@ -3,6 +3,11 @@ version = 1
 firmware = ".pio/build/heltec_wifi_lora_32_V3/firmware.bin"
 elf = ".pio/build/heltec_wifi_lora_32_V3/firmware.elf"
 
+# Пробрасываем 80 порт ESP32 (веб-сервер) на 8180 порт локального компьютера
+[[net.forward]]
+from = "localhost:8180"
+to = "target:80"
+
 [[chip]]
 name = 'bmp280'
 # Скомпилировано из bmp280.chip.c командой:
