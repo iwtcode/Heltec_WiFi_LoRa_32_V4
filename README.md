@@ -1,4 +1,4 @@
-# 📟 Heltec WiFi LoRa 32 V4 — BMP280 + OLED + вентилятор + Wi-Fi дашборд
+# 📟 Heltec WiFi LoRa 32 V4 — BMP280 + OLED + motor610 + Wi-Fi дашборд
 
 <p align="center">
   <img src="images/wokwi_diagram.png" alt="Heltec WiFi LoRa 32 V4" width="50%" />
