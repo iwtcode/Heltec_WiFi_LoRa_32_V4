@@ -12,7 +12,7 @@ static const char *TAG = "BMP280";
 #define BMP280_REG_TEMP_MSB    0xFA
 #define BMP280_REG_CALIB_T1LSB 0x88
 
-#define BMP280_I2C_TIMEOUT_MS  1000
+#define BMP280_I2C_TIMEOUT_MS  50
 
 typedef struct {
     uint16_t dig_T1;

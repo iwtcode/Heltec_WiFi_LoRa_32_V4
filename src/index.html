@@ -245,7 +245,7 @@
 <div class="wrap">
 
   <header>
-    <h1>🌀 Motor610 Fan Control</h1>
+    <h1>Fan Control Center</h1>
     <div class="sub"><span class="status-dot" id="statusDot"></span><span id="statusText">подключение…</span></div>
   </header>
 
@@ -296,6 +296,7 @@
 
   const MIN = 5000, MAX = 45000;
   let dragging = false;
+  let ignoreUpdatesUntil = 0; // Защита от "отскока" ползунка
   let flagTimer = null;
 
   function updateFill(){
@@ -307,23 +308,30 @@
     return Math.round(n).toLocaleString('ru-RU');
   }
 
-  // Живое обновление подписи лимита прямо во время перетаскивания
+  // Обновление цифр во время перетаскивания
   slider.addEventListener('input', () => {
     dragging = true;
     limitVal.textContent = formatNum(slider.value);
     updateFill();
   });
 
-  // Применяем значение ТОЛЬКО когда пользователь отпустил ползунок
-  function applyLimit(){
-    dragging = false;
+  // Отправляем значение ОДИН раз при отпускании ползунка
+  slider.addEventListener('change', () => {
     const value = slider.value;
-    fetch('/set?rpm=' + value).catch(() => {});
-    showApplied();
-  }
-  slider.addEventListener('change', applyLimit);
-  slider.addEventListener('pointerup', applyLimit);
-  slider.addEventListener('touchend', applyLimit);
+    
+    // Блокируем перезапись ползунка сервером на 1 секунду, чтобы он не прыгал назад
+    ignoreUpdatesUntil = Date.now() + 1000;
+    
+    fetch('/set?rpm=' + value)
+      .then(() => {
+        showApplied();
+        refresh(); // Принудительно запрашиваем новые данные сразу после применения
+      })
+      .catch(() => {})
+      .finally(() => {
+        dragging = false;
+      });
+  });
 
   function showApplied(){
     applyFlag.classList.add('show');
@@ -350,7 +358,10 @@
           const speed = Math.max(0.4, Math.min(3, d.current_rpm / MAX * 3));
           fanIcon.style.animationDuration = (d.current_rpm > 50 ? (1 / speed) : 0) + 's';
         }
-        if (typeof d.max_rpm === 'number' && !dragging) {
+        
+        // Обновляем ползунок сервером ТОЛЬКО если мы его сейчас не трогаем 
+        // и прошло достаточно времени с момента последнего клика
+        if (typeof d.max_rpm === 'number' && !dragging && Date.now() > ignoreUpdatesUntil) {
           slider.value = d.max_rpm;
           limitVal.textContent = formatNum(d.max_rpm);
           updateFill();
@@ -361,7 +372,7 @@
 
   updateFill();
   refresh();
-  setInterval(refresh, 1500);
+  setInterval(refresh, 500); // Регулярный опрос продолжает работать
 </script>
 </body>
 </html>

@@ -105,7 +105,6 @@ static esp_err_t set_handler(httpd_req_t *req)
     char buf[128];
     if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
         char param[32];
-        // Ищем параметр rpm=
         if (httpd_query_key_value(buf, "rpm", param, sizeof(param)) == ESP_OK) {
             float new_rpm = atof(param);
             if (new_rpm < RPM_LIMIT_MIN) new_rpm = RPM_LIMIT_MIN;
@@ -114,10 +113,11 @@ static esp_err_t set_handler(httpd_req_t *req)
             ESP_LOGI(TAG, "Установлен новый лимит RPM: %.0f", motor610_max_rpm);
         }
     }
-    // Перенаправление обратно на главную страницу (код 303)
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);
+    
+    // ВМЕСТО РЕДИРЕКТА ОТВЕЧАЕМ ПРОСТЫМ ТЕКСТОМ (это ускорит ответ в 10 раз)
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, "OK", 2);
+    
     return ESP_OK;
 }
 
@@ -208,55 +208,95 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Инициализация OLED через библиотеку...");
     ssd1306_handle_t oled = ssd1306_create(I2C_MASTER_NUM, OLED_ADDR);
-
-    ssd1306_clear_screen(oled, 0x00);
-    ssd1306_refresh_gram(oled);
+    if (oled != NULL) {
+        ssd1306_clear_screen(oled, 0x00);
+        ssd1306_refresh_gram(oled);
+    } else {
+        ESP_LOGE(TAG, "OLED дисплей не найден или не инициализирован");
+    }
 
     ESP_LOGI(TAG, "Инициализация датчика BMP280...");
     esp_err_t bmp_err = bmp280_init(I2C_MASTER_NUM);
-    if (bmp_err != ESP_OK) {
-        ESP_LOGW(TAG, "BMP280 не инициализирован (%s)", esp_err_to_name(bmp_err));
-        ssd1306_draw_string(oled, 0, 16, (const uint8_t *)"BMP280 ERROR", 16, 1);
-        ssd1306_refresh_gram(oled);
+    bool bmp_ok = (bmp_err == ESP_OK);
+    
+    if (!bmp_ok) {
+        ESP_LOGW(TAG, "BMP280 не обнаружен при запуске");
     }
 
     ESP_LOGI(TAG, "Инициализация ШИМ вентилятора motor610 (пин %d)...", MOTOR610_PWM_PIN);
     motor610_init();
     motor610_set_rpm(0.0f);
 
-    int counter = 0;
+    // Временные метки для асинхронного выполнения задач
+    TickType_t last_bmp_time = 0;
+    TickType_t last_motor_time = 0;
+    TickType_t last_oled_time = 0;
+
     while (1) {
-        float temperature = 0.0f;
-        if (bmp_err == ESP_OK && bmp280_read_temperature(I2C_MASTER_NUM, &temperature) == ESP_OK) {
-            float target_rpm = motor610_target_rpm_for_temp(temperature);
-            motor610_set_rpm(target_rpm);
+        TickType_t now = xTaskGetTickCount();
 
-            // Обновляем значения, которые отдаёт веб-сервер (/rpm)
-            g_current_temp = temperature;
-            g_current_rpm  = target_rpm;
+        // 1. АСИНХРОННЫЙ ОПРОС ДАТЧИКА
+        if (now - last_bmp_time >= pdMS_TO_TICKS(50) || last_bmp_time == 0) {
+            last_bmp_time = now;
+            
+            // Если датчик не в порядке, пытаемся его найти заново
+            if (!bmp_ok) {
+                bmp_ok = (bmp280_init(I2C_MASTER_NUM) == ESP_OK);
+            }
 
-            // 1. Очищаем виртуальный буфер дисплея
-            ssd1306_clear_screen(oled, 0x00);
-
-            // 2. Формируем строки с текстом
-            char temp_str[32];
-            char rpm_str[32];
-            char maxrpm_str[32];
-            snprintf(temp_str, sizeof(temp_str), "Temp: %.1f C", temperature);
-            snprintf(rpm_str, sizeof(rpm_str), "Fan: %.0f RPM", target_rpm);
-            snprintf(maxrpm_str, sizeof(maxrpm_str), "Max: %.0f", motor610_max_rpm);
-
-            // 3. Рисуем текст в буфере
-            ssd1306_draw_string(oled, 0, 0, (const uint8_t *)temp_str, 16, 1);
-            ssd1306_draw_string(oled, 0, 20, (const uint8_t *)rpm_str, 16, 1);
-            ssd1306_draw_string(oled, 0, 40, (const uint8_t *)maxrpm_str, 16, 1);
-
-            // 4. Отправляем буфер на физический экран по I2C
-            ssd1306_refresh_gram(oled);
-        } else {
-            ESP_LOGW(TAG, "Не удалось прочитать температуру | счетчик: %d", counter);
+            if (bmp_ok) {
+                float temperature = 0.0f;
+                if (bmp280_read_temperature(I2C_MASTER_NUM, &temperature) == ESP_OK) {
+                    g_current_temp = temperature;
+                } else {
+                    ESP_LOGW(TAG, "Потеряна связь с датчиком BMP280");
+                    bmp_ok = false;
+                }
+            }
         }
-        counter++;
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        // 2. АСИНХРОННОЕ ОБНОВЛЕНИЕ МОТОРА
+        // Высокая частота нужна, чтобы мотор мгновенно реагировал на ползунок из Web-интерфейса
+        if (now - last_motor_time >= pdMS_TO_TICKS(50) || last_motor_time == 0) {
+            last_motor_time = now;
+            
+            if (bmp_ok) {
+                float target_rpm = motor610_target_rpm_for_temp(g_current_temp);
+                motor610_set_rpm(target_rpm);
+                g_current_rpm = target_rpm;
+            } else {
+                // Если датчик оторвали, безопасно глушим мотор
+                motor610_set_rpm(0.0f);
+                g_current_rpm = 0.0f;
+            }
+        }
+
+        // 3. АСИНХРОННОЕ ОБНОВЛЕНИЕ ЭКРАНА
+        if (now - last_oled_time >= pdMS_TO_TICKS(50) || last_oled_time == 0) {
+            last_oled_time = now;
+            
+            if (oled != NULL) {
+                ssd1306_clear_screen(oled, 0x00);
+                
+                if (bmp_ok) {
+                    char temp_str[32];
+                    char rpm_str[32];
+                    char maxrpm_str[32];
+                    snprintf(temp_str, sizeof(temp_str), "Temp: %.1f C", g_current_temp);
+                    snprintf(rpm_str, sizeof(rpm_str), "Fan: %.0f RPM", g_current_rpm);
+                    snprintf(maxrpm_str, sizeof(maxrpm_str), "Max: %.0f RPM", motor610_max_rpm);
+
+                    ssd1306_draw_string(oled, 0, 0, (const uint8_t *)temp_str, 16, 1);
+                    ssd1306_draw_string(oled, 0, 20, (const uint8_t *)rpm_str, 16, 1);
+                    ssd1306_draw_string(oled, 0, 40, (const uint8_t *)maxrpm_str, 16, 1);
+                } else {
+                    ssd1306_draw_string(oled, 0, 16, (const uint8_t *)"BMP ERROR", 16, 1);
+                    ssd1306_draw_string(oled, 0, 40, (const uint8_t *)"Sensor Missing", 12, 1);
+                }
+                
+                ssd1306_refresh_gram(oled);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
