@@ -11,7 +11,6 @@
 #include "motor610.h"
 #include "ssd1306.h"
 
-// Подключаем библиотеки для Wi-Fi и HTTP
 #include "nvs_flash.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -35,23 +34,14 @@ static const char *TAG = "HELTEC_V4";
 #define RPM_LIMIT_MIN 5000.0f
 #define RPM_LIMIT_MAX 45000.0f
 
-// Переменные для встроенных файлов
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
 
-extern const uint8_t style_css_start[]  asm("_binary_style_css_start");
-extern const uint8_t style_css_end[]    asm("_binary_style_css_end");
-
-extern const uint8_t script_js_start[]  asm("_binary_script_js_start");
-extern const uint8_t script_js_end[]    asm("_binary_script_js_end");
-
-// Глобальные переменные
 static volatile float g_current_temp = 0.0f;
 static volatile float g_current_rpm  = 0.0f;
 static volatile bool  g_bmp_ok       = false;
-static volatile bool  g_fan_power    = true; // Состояние питания вентилятора
+static volatile bool  g_fan_power    = true; 
 
-// Глобальный хендл веб-сервера для широковещательной рассылки WS
 static httpd_handle_t g_server = NULL;
 
 void heltec_board_init() {
@@ -76,14 +66,10 @@ void i2c_master_init() {
     i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
 }
 
-// ==========================================
-// WebSockets Асинхронная рассылка
-// ==========================================
 static void broadcast_ws_data_work(void *arg) {
     if (!g_server) return;
 
     char buf[256];
-    // Добавили поля min и max температуры
     int len = snprintf(buf, sizeof(buf),
         "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f}",
         motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max);
@@ -107,10 +93,7 @@ static void broadcast_ws_data_work(void *arg) {
 }
 
 static esp_err_t ws_handler(httpd_req_t *req) {
-    if (req->method == HTTP_GET) {
-        httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
-        return ESP_OK;
-    }
+    if (req->method == HTTP_GET) return ESP_OK;
 
     httpd_ws_frame_t ws_pkt;
     uint8_t buf[64] = { 0 };
@@ -122,28 +105,39 @@ static esp_err_t ws_handler(httpd_req_t *req) {
     if (ret != ESP_OK) return ret;
 
     if (ws_pkt.len > 0) {
-        // Парсим команду лимита RPM
-        if (strncmp((char*)ws_pkt.payload, "rpm:", 4) == 0) {
+        if (strncmp((char*)ws_pkt.payload, "init:", 5) == 0) {
+            // ИСПРАВЛЕНИЕ: Отправляем ответ СИНХРОННО самому запрашивающему сокету, чтобы не было ошибки async
+            char out_buf[256];
+            int out_len = snprintf(out_buf, sizeof(out_buf),
+                "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f}",
+                motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max);
+            
+            httpd_ws_frame_t ws_reply = {
+                .payload = (uint8_t*)out_buf,
+                .len = out_len,
+                .type = HTTPD_WS_TYPE_TEXT
+            };
+            httpd_ws_send_frame(req, &ws_reply);
+        }
+        else if (strncmp((char*)ws_pkt.payload, "rpm:", 4) == 0) {
             float new_rpm = atof((char*)ws_pkt.payload + 4);
             if (new_rpm < RPM_LIMIT_MIN) new_rpm = RPM_LIMIT_MIN;
             if (new_rpm > RPM_LIMIT_MAX) new_rpm = RPM_LIMIT_MAX;
             motor610_max_rpm = new_rpm;
-            httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
+            httpd_queue_work(req->handle, broadcast_ws_data_work, NULL);
         }
-        // Парсим команду питания (1 - ВКЛ, 0 - ВЫКЛ)
         else if (strncmp((char*)ws_pkt.payload, "power:", 6) == 0) {
             int pwr = atoi((char*)ws_pkt.payload + 6);
             g_fan_power = (pwr > 0);
-            httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
+            httpd_queue_work(req->handle, broadcast_ws_data_work, NULL);
         }
-        // Парсим команду диапазона температур
         else if (strncmp((char*)ws_pkt.payload, "temp_range:", 11) == 0) {
             float t_min, t_max;
             if (sscanf((char*)ws_pkt.payload + 11, "%f,%f", &t_min, &t_max) == 2) {
-                if (t_min >= t_max) t_min = t_max - 1.0f; // Защита от пересечения
+                if (t_min >= t_max) t_min = t_max - 1.0f;
                 motor610_temp_min = t_min;
                 motor610_temp_max = t_max;
-                httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
+                httpd_queue_work(req->handle, broadcast_ws_data_work, NULL);
             }
         }
     }
@@ -152,22 +146,15 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 
 static esp_err_t get_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
-    // Вычитаем 1, чтобы отсечь нулевой терминатор (\0)
+    // Отправляем сжато или как есть (теперь это один файл)
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
     httpd_resp_send(req, (const char *)index_html_start, (index_html_end - index_html_start) - 1);
     return ESP_OK;
 }
 
-static esp_err_t style_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "text/css");
-    // Вычитаем 1, чтобы отсечь нулевой терминатор (\0)
-    httpd_resp_send(req, (const char *)style_css_start, (style_css_end - style_css_start) - 1);
-    return ESP_OK;
-}
-
-static esp_err_t script_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "application/javascript");
-    // Вычитаем 1, чтобы отсечь нулевой терминатор (\0)
-    httpd_resp_send(req, (const char *)script_js_start, (script_js_end - script_js_start) - 1);
+static esp_err_t favicon_handler(httpd_req_t *req) {
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -205,16 +192,16 @@ void wifi_ap_init_and_start_webserver(void) {
     esp_wifi_connect();
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.max_open_sockets = 10;
+    config.lru_purge_enable = true;
+    config.max_uri_handlers = 8;
     
     if (httpd_start(&g_server, &config) == ESP_OK) {
         httpd_uri_t uri_get = { .uri = "/", .method = HTTP_GET, .handler = get_handler };
         httpd_register_uri_handler(g_server, &uri_get);
 
-        httpd_uri_t uri_style = { .uri = "/style.css", .method = HTTP_GET, .handler = style_handler };
-        httpd_register_uri_handler(g_server, &uri_style);
-
-        httpd_uri_t uri_script = { .uri = "/script.js", .method = HTTP_GET, .handler = script_handler };
-        httpd_register_uri_handler(g_server, &uri_script);
+        httpd_uri_t uri_favicon = { .uri = "/favicon.ico", .method = HTTP_GET, .handler = favicon_handler };
+        httpd_register_uri_handler(g_server, &uri_favicon);
 
         httpd_uri_t uri_ws = {
             .uri = "/ws",
@@ -227,9 +214,6 @@ void wifi_ap_init_and_start_webserver(void) {
     }
 }
 
-// ==========================================
-// Задачи FreeRTOS
-// ==========================================
 static void bmp280_task(void *pvParameters) {
     while (1) {
         if (!g_bmp_ok) g_bmp_ok = (bmp280_init(I2C_MASTER_NUM) == ESP_OK);
@@ -241,7 +225,8 @@ static void bmp280_task(void *pvParameters) {
                 g_bmp_ok = false;
             }
         }
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        // ИСПРАВЛЕНИЕ: Снизили задержку с 500 до 100 мс, чтобы данные в интерфейс летели моментально
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
 
@@ -251,13 +236,12 @@ static void motor_task(void *pvParameters) {
     float last_b_max = -1.0f;
     float last_b_tmin = -1.0f;
     float last_b_tmax = -1.0f;
-    bool  last_b_power = !g_fan_power; // Для принудительной первой отправки
+    bool  last_b_power = !g_fan_power; 
     TickType_t last_broadcast = 0;
 
     while (1) {
         if (g_bmp_ok) {
             float target_rpm = motor610_target_rpm_for_temp(g_current_temp);
-            // Если выключено - принудительно 0
             if (!g_fan_power) target_rpm = 0.0f;
             
             motor610_set_rpm(target_rpm);
@@ -267,20 +251,22 @@ static void motor_task(void *pvParameters) {
             g_current_rpm = 0.0f;
         }
 
-        // --- УМНАЯ РАССЫЛКА ДАННЫХ WS ---
         float diff_temp = g_current_temp - last_b_temp;
         float diff_rpm = g_current_rpm - last_b_rpm;
         
-        bool changed = (diff_temp < -0.05f || diff_temp > 0.05f) ||
-                       (diff_rpm < -1.0f || diff_rpm > 1.0f) ||
+        bool changed = (diff_temp < -0.1f || diff_temp > 0.1f) ||
+                       (diff_rpm < -20.0f || diff_rpm > 20.0f) ||
                        (motor610_max_rpm != last_b_max) ||
                        (g_fan_power != last_b_power) ||
                        (motor610_temp_min != last_b_tmin) ||
                        (motor610_temp_max != last_b_tmax); 
                        
         TickType_t now = xTaskGetTickCount();
-        
-        if (changed || (now - last_broadcast > 1000 / portTICK_PERIOD_MS)) {
+        bool first_broadcast = (last_broadcast == 0);
+        bool interval_ok = first_broadcast ||
+            ((now - last_broadcast) >= (50 / portTICK_PERIOD_MS));
+
+        if (changed && interval_ok) {
             last_b_temp = g_current_temp;
             last_b_rpm = g_current_rpm;
             last_b_max = motor610_max_rpm;
@@ -292,7 +278,7 @@ static void motor_task(void *pvParameters) {
             if (g_server) httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
         }
 
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
 
@@ -317,7 +303,7 @@ static void oled_task(void *pvParameters) {
             }
             ssd1306_refresh_gram(oled);
         }
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
 

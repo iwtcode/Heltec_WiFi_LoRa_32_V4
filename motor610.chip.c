@@ -272,42 +272,47 @@ static void render_frame(chip_state_t *chip, float duty) {
       float fx = (float)x - cx;
       float fy = (float)y - cy;
       float r = sqrtf(fx * fx + fy * fy);
-      float theta = atan2f(fy, fx);
 
+      // ОПТИМИЗАЦИЯ: Если мы за пределами корпуса вентилятора - делаем пиксель 
+      // полностью прозрачным и пропускаем тяжелую тригонометрию.
+      if (r > r_outer) {
+        set_px(chip, x, y, 0, 0, 0, 0);
+        continue;
+      }
+
+      float theta = atan2f(fy, fx);
       uint8_t r8 = 0, g8 = 0, b8 = 0, a8 = 0;
 
-      if (r <= r_outer) {
-        if (r > r_frame_inner) {
-          // пластиковый корпус/обод
-          r8 = 205; g8 = 205; b8 = 210; a8 = 255;
-        } else {
-          // тёмное "нутро" вентилятора за решёткой
-          r8 = 25; g8 = 25; b8 = 28; a8 = 255;
-        }
+      if (r > r_frame_inner) {
+        // пластиковый корпус/обод
+        r8 = 205; g8 = 205; b8 = 210; a8 = 255;
+      } else {
+        // тёмное "нутро" вентилятора за решёткой
+        r8 = 25; g8 = 25; b8 = 28; a8 = 255;
+      }
 
-        // лопасти
-        if (r >= hub_r && r <= blade_r) {
-          float frac = (r - hub_r) / (blade_r - hub_r);
-          float half_w = blade_half_width * (1.0f - 0.35f * frac);
-          for (int k = 0; k < blades; k++) {
-            float base_angle = (float)k * (2.0f * PI_F / (float)blades);
-            float center_angle = angle_wrap(chip->angle + base_angle + blade_curve * frac);
-            float d = angle_diff(theta, center_angle);
-            if (fabsf(d) < half_w) {
-              r8 = blade_r8; g8 = blade_g8; b8 = blade_b8; a8 = 255;
-              break;
-            }
+      // лопасти
+      if (r >= hub_r && r <= blade_r) {
+        float frac = (r - hub_r) / (blade_r - hub_r);
+        float half_w = blade_half_width * (1.0f - 0.35f * frac);
+        for (int k = 0; k < blades; k++) {
+          float base_angle = (float)k * (2.0f * PI_F / (float)blades);
+          float center_angle = angle_wrap(chip->angle + base_angle + blade_curve * frac);
+          float d = angle_diff(theta, center_angle);
+          if (fabsf(d) < half_w) {
+            r8 = blade_r8; g8 = blade_g8; b8 = blade_b8; a8 = 255;
+            break;
           }
         }
+      }
 
-        // ступица мотора поверх лопастей
-        if (r <= hub_r) {
-          float shade = 1.0f - (r / hub_r) * 0.4f;
-          r8 = (uint8_t)(45.0f * shade);
-          g8 = (uint8_t)(45.0f * shade);
-          b8 = (uint8_t)(50.0f * shade);
-          a8 = 255;
-        }
+      // ступица мотора поверх лопастей
+      if (r <= hub_r) {
+        float shade = 1.0f - (r / hub_r) * 0.4f;
+        r8 = (uint8_t)(45.0f * shade);
+        g8 = (uint8_t)(45.0f * shade);
+        b8 = (uint8_t)(50.0f * shade);
+        a8 = 255;
       }
 
       set_px(chip, x, y, r8, g8, b8, a8);
