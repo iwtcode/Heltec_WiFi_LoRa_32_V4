@@ -70,9 +70,10 @@ static void broadcast_ws_data_work(void *arg) {
     if (!g_server) return;
 
     char buf[256];
+    // ДОБАВЛЕНО: передача параметра bmp_ok
     int len = snprintf(buf, sizeof(buf),
-        "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f}",
-        motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max);
+        "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f,\"bmp_ok\":%d}",
+        motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max, g_bmp_ok ? 1 : 0);
 
     httpd_ws_frame_t ws_pkt = {
         .payload = (uint8_t*)buf,
@@ -106,11 +107,11 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 
     if (ws_pkt.len > 0) {
         if (strncmp((char*)ws_pkt.payload, "init:", 5) == 0) {
-            // ИСПРАВЛЕНИЕ: Отправляем ответ СИНХРОННО самому запрашивающему сокету, чтобы не было ошибки async
             char out_buf[256];
+            // ДОБАВЛЕНО: передача параметра bmp_ok при инициализации
             int out_len = snprintf(out_buf, sizeof(out_buf),
-                "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f}",
-                motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max);
+                "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f,\"bmp_ok\":%d}",
+                motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max, g_bmp_ok ? 1 : 0);
             
             httpd_ws_frame_t ws_reply = {
                 .payload = (uint8_t*)out_buf,
@@ -146,7 +147,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 
 static esp_err_t get_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
-    // Отправляем сжато или как есть (теперь это один файл)
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
     httpd_resp_send(req, (const char *)index_html_start, (index_html_end - index_html_start) - 1);
     return ESP_OK;
@@ -216,16 +216,19 @@ void wifi_ap_init_and_start_webserver(void) {
 
 static void bmp280_task(void *pvParameters) {
     while (1) {
-        if (!g_bmp_ok) g_bmp_ok = (bmp280_init(I2C_MASTER_NUM) == ESP_OK);
+        if (!g_bmp_ok) {
+            // Пытаемся (пере)подключить датчик
+            g_bmp_ok = (bmp280_init(I2C_MASTER_NUM) == ESP_OK);
+        }
+        
         if (g_bmp_ok) {
             float temperature = 0.0f;
             if (bmp280_read_temperature(I2C_MASTER_NUM, &temperature) == ESP_OK) {
                 g_current_temp = temperature;
             } else {
-                g_bmp_ok = false;
+                g_bmp_ok = false; // Соединение потеряно
             }
         }
-        // ИСПРАВЛЕНИЕ: Снизили задержку с 500 до 100 мс, чтобы данные в интерфейс летели моментально
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
@@ -237,6 +240,7 @@ static void motor_task(void *pvParameters) {
     float last_b_tmin = -1.0f;
     float last_b_tmax = -1.0f;
     bool  last_b_power = !g_fan_power; 
+    bool  last_b_bmp = !g_bmp_ok; // Отслеживаем состояние датчика
     TickType_t last_broadcast = 0;
 
     while (1) {
@@ -247,6 +251,7 @@ static void motor_task(void *pvParameters) {
             motor610_set_rpm(target_rpm);
             g_current_rpm = target_rpm;
         } else {
+            // Если BMP отключен, просто выключаем вентилятор
             motor610_set_rpm(0.0f);
             g_current_rpm = 0.0f;
         }
@@ -259,7 +264,8 @@ static void motor_task(void *pvParameters) {
                        (motor610_max_rpm != last_b_max) ||
                        (g_fan_power != last_b_power) ||
                        (motor610_temp_min != last_b_tmin) ||
-                       (motor610_temp_max != last_b_tmax); 
+                       (motor610_temp_max != last_b_tmax) ||
+                       (g_bmp_ok != last_b_bmp); // Транслировать при обрыве/восстановлении BMP
                        
         TickType_t now = xTaskGetTickCount();
         bool first_broadcast = (last_broadcast == 0);
@@ -273,6 +279,7 @@ static void motor_task(void *pvParameters) {
             last_b_tmin = motor610_temp_min;
             last_b_tmax = motor610_temp_max;
             last_b_power = g_fan_power;
+            last_b_bmp = g_bmp_ok;
             last_broadcast = now;
             
             if (g_server) httpd_queue_work(g_server, broadcast_ws_data_work, NULL);
@@ -287,20 +294,26 @@ static void oled_task(void *pvParameters) {
     while (1) {
         if (oled != NULL) {
             ssd1306_clear_screen(oled, 0x00);
+            
+            char t_str[32], r_str[32], m_str[32], p_str[32];
+            
+            // Если датчик работает - выводим температуру, иначе рисуем прочерк
             if (g_bmp_ok) {
-                char t_str[32], r_str[32], m_str[32], p_str[32];
                 snprintf(t_str, sizeof(t_str), "Temp: %.1f C", g_current_temp);
-                snprintf(r_str, sizeof(r_str), "Fan: %.0f", g_current_rpm);
-                snprintf(m_str, sizeof(m_str), "Max: %.0f", motor610_max_rpm);
-                snprintf(p_str, sizeof(p_str), "PWR: %s", g_fan_power ? "ON" : "OFF");
-                
-                ssd1306_draw_string(oled, 0, 0, (const uint8_t *)t_str, 16, 1);
-                ssd1306_draw_string(oled, 0, 16, (const uint8_t *)r_str, 16, 1);
-                ssd1306_draw_string(oled, 0, 32, (const uint8_t *)m_str, 16, 1);
-                ssd1306_draw_string(oled, 0, 48, (const uint8_t *)p_str, 16, 1);
             } else {
-                ssd1306_draw_string(oled, 0, 16, (const uint8_t *)"BMP ERROR", 16, 1);
+                snprintf(t_str, sizeof(t_str), "Temp: -- C");
             }
+            
+            // Интерфейс не падает, а продолжает рисовать остальные параметры
+            snprintf(r_str, sizeof(r_str), "Fan: %.0f", g_current_rpm);
+            snprintf(m_str, sizeof(m_str), "Max: %.0f", motor610_max_rpm);
+            snprintf(p_str, sizeof(p_str), "PWR: %s", g_fan_power ? "ON" : "OFF");
+            
+            ssd1306_draw_string(oled, 0, 0, (const uint8_t *)t_str, 16, 1);
+            ssd1306_draw_string(oled, 0, 16, (const uint8_t *)r_str, 16, 1);
+            ssd1306_draw_string(oled, 0, 32, (const uint8_t *)m_str, 16, 1);
+            ssd1306_draw_string(oled, 0, 48, (const uint8_t *)p_str, 16, 1);
+            
             ssd1306_refresh_gram(oled);
         }
         vTaskDelay(500 / portTICK_PERIOD_MS);

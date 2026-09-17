@@ -180,11 +180,22 @@
         
         if (typeof d.power === 'number') { 
           const isOn = d.power === 1; 
-          // ИСПРАВЛЕНИЕ 1: проверяем, не висит ли еще надпись "Загрузка..."
           if (powerToggle.checked !== isOn || powerStateText.textContent === 'Загрузка...') setPowerUI(isOn); 
         }
         
-        if (typeof d.temp === 'number') { const t = d.temp.toFixed(1); if (tempVal.textContent !== t) tempVal.textContent = t; }
+        // ПРОВЕРКА НАЛИЧИЯ ДАТЧИКА:
+        if (typeof d.bmp_ok === 'number') {
+          if (d.bmp_ok === 1) {
+            // Датчик на связи
+            if (typeof d.temp === 'number') { 
+              const t = d.temp.toFixed(1); 
+              if (tempVal.textContent !== t) tempVal.textContent = t; 
+            }
+          } else {
+            // Датчик отвалился — рисуем прочерки
+            if (tempVal.textContent !== '--') tempVal.textContent = '--';
+          }
+        }
         
         if (typeof d.current_rpm === 'number') {
           const rpmStr = formatNum(d.current_rpm);
@@ -196,7 +207,6 @@
         }
         
         if (typeof d.max_rpm === 'number' && !dragging && Date.now() > ignoreUpdatesUntil) {
-          // ИСПРАВЛЕНИЕ 2: Проверяем, не висит ли дефолтный текст '--'
           if (slider.value != Math.round(d.max_rpm) || limitVal.textContent === '--') {
             slider.value = Math.round(d.max_rpm); limitVal.textContent = formatNum(d.max_rpm); updateFill();
           }
