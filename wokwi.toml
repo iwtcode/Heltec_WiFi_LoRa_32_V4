@@ -21,3 +21,8 @@ name = 'motor610'
 #   wokwi-cli chip compile motor610.chip.c -o motor610.chip.wasm
 # В diagram.json чип используется как "type": "chip-motor610"
 binary = 'motor610.chip.wasm'
+
+[[chip]]
+name = 'peltier'
+# Visual two-wire Peltier element used as "chip-peltier" in diagram.json.
+binary = 'peltier.chip.wasm'

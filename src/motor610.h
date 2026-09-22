@@ -18,12 +18,13 @@ extern "C" {
 
 #define MOTOR610_MAX_DUTY     ((1 << 10) - 1)
 
-// Логика зависимости скорости от температуры:
-extern float motor610_temp_min;
-extern float motor610_temp_max;
-
-// Теперь это не макрос, а глобальная переменная, которую можно менять через Wi-Fi
+// Пользовательский верхний предел оборотов, настраиваемый через Wi-Fi.
 extern float motor610_max_rpm;
+
+// Коэффициенты PID-регулятора. Выход регулятора задаётся в об/мин.
+#define MOTOR610_PID_KP 7000.0f
+#define MOTOR610_PID_KI 600.0f
+#define MOTOR610_PID_KD 1500.0f
 
 /**
  * Инициализация аппаратного ШИМ (LEDC) для управления вентилятором motor610.
@@ -31,9 +32,19 @@ extern float motor610_max_rpm;
 void motor610_init(void);
 
 /**
- * Пересчитывает температуру (°C) в целевую скорость вентилятора (об/мин).
+ * Сбрасывает накопленное состояние PID-регулятора.
  */
-float motor610_target_rpm_for_temp(float temp_c);
+void motor610_pid_reset(void);
+
+/**
+ * Вычисляет целевую скорость вентилятора PID-регулятором.
+ * Ошибка положительна, когда элемент Пельтье горячее заданной температуры.
+ *
+ * @param measured_temp_c измеренная температура элемента Пельтье, °C
+ * @param target_temp_c   целевая температура, °C
+ * @param dt_seconds      время с предыдущего вычисления, с
+ */
+float motor610_pid_update(float measured_temp_c, float target_temp_c, float dt_seconds);
 
 /**
  * Устанавливает скважность ШИМ на пине S по целевым оборотам.

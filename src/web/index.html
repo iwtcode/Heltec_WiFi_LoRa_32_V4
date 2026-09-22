@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Smart Fan Dashboard</title>
+  <title>Peltier PID Cooling</title>
   <link rel="icon" href="data:,">
   <style>
     :root { --bg: #0b0d12; --card-bg: rgba(26, 30, 41, 0.6); --card-border: rgba(255, 255, 255, 0.05); --accent: #00ff88; --accent-glow: rgba(0, 255, 136, 0.3); --temp: #ff5c5c; --temp-glow: rgba(255, 92, 92, 0.3); --text-main: #f0f2f5; --text-muted: #8b949e; --danger: #ff4b4b; --body-grad1: #161c27; --track-bg: rgba(255, 255, 255, 0.08); --thumb-bg: #fff; }
@@ -65,7 +65,7 @@
 <body>
   <div class="container">
     <header>
-      <h1>Fan Control</h1>
+      <h1>Peltier PID Cooling</h1>
       <div style="display: flex; gap: 10px; align-items: center;">
         <button id="themeToggle" class="theme-btn" title="Переключить тему">☀️</button>
         <div class="status-badge"><div class="dot offline" id="statusDot"></div><span id="statusText">Офлайн</span></div>
@@ -74,7 +74,7 @@
 
     <div class="power-card">
       <div class="power-info">
-        <div class="label">Питание мотора</div>
+        <div class="label">PID-охлаждение</div>
         <div class="state" id="powerStateText">Загрузка...</div>
       </div>
       <label class="switch">
@@ -87,7 +87,7 @@
       <div class="stat-card temp">
         <div class="glow-circle"></div>
         <span class="icon">🌡️</span>
-        <div class="title">Температура</div>
+        <div class="title">Температура Пельтье</div>
         <div><span class="value" id="tempVal">--</span><span class="unit">°C</span></div>
       </div>
       <div class="stat-card rpm">
@@ -100,15 +100,10 @@
 
     <div class="control-panel">
       <div class="control-header">
-        <div class="title">Диапазон температур</div>
-        <div><span class="val" id="tempRangeVal">22 - 30</span><span class="unit"> °C</span></div>
+        <div class="title">Целевая температура</div>
+        <div><span class="val" id="targetTempVal">25.0</span><span class="unit"> °C</span></div>
       </div>
-      <div class="range-slider temp-slider">
-        <div class="track"></div>
-        <div class="fill" id="tempSliderFill"></div>
-        <input type="range" id="tempMinSlider" min="10" max="50" step="1" value="22" disabled>
-        <input type="range" id="tempMaxSlider" min="10" max="50" step="1" value="30" disabled>
-      </div>
+      <input type="range" id="targetTempSlider" class="single" min="10" max="50" step="0.5" value="25" disabled>
       <div class="range-labels"><span>10 °C</span><span>50 °C</span></div>
     </div>
 
@@ -128,14 +123,13 @@
     const fanIcon = document.getElementById('fanIcon'), powerToggle = document.getElementById('powerToggle');
     const powerStateText = document.getElementById('powerStateText'), statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText'), themeToggle = document.getElementById('themeToggle');
-    const tempMinSlider = document.getElementById('tempMinSlider'), tempMaxSlider = document.getElementById('tempMaxSlider');
-    const tempSliderFill = document.getElementById('tempSliderFill'), tempRangeVal = document.getElementById('tempRangeVal');
+    const targetTempSlider = document.getElementById('targetTempSlider'), targetTempVal = document.getElementById('targetTempVal');
 
-    const MIN = 5000, MAX = 45000;
-    let dragging = false, ignoreUpdatesUntil = 0, tempDragging = false, tempIgnoreUpdatesUntil = 0;
+    const MIN = 5000, MAX = 45000, TEMP_MIN = 10, TEMP_MAX = 50;
+    let dragging = false, ignoreUpdatesUntil = 0, targetDragging = false, targetIgnoreUpdatesUntil = 0;
     let ws = null, isDark = true, dataReceived = false;
 
-    function setControlsEnabled(enabled) { powerToggle.disabled = tempMinSlider.disabled = tempMaxSlider.disabled = slider.disabled = !enabled; }
+    function setControlsEnabled(enabled) { powerToggle.disabled = targetTempSlider.disabled = slider.disabled = !enabled; }
 
     if (localStorage.getItem('theme') === 'light') {
       isDark = false; document.documentElement.setAttribute('data-theme', 'light'); themeToggle.textContent = '🌙';
@@ -154,12 +148,11 @@
       slider.style.setProperty('--fill', pct + '%');
     }
 
-    function updateTempSliderUI() {
-      const minVal = parseInt(tempMinSlider.min), maxVal = parseInt(tempMinSlider.max);
-      let min = parseInt(tempMinSlider.value), max = parseInt(tempMaxSlider.value);
-      const pct1 = ((min - minVal) / (maxVal - minVal)) * 100, pct2 = ((max - minVal) / (maxVal - minVal)) * 100;
-      tempSliderFill.style.left = pct1 + '%'; tempSliderFill.style.width = (pct2 - pct1) + '%';
-      tempRangeVal.textContent = min + ' - ' + max;
+    function updateTargetTempUI() {
+      const value = Number(targetTempSlider.value);
+      const pct = (value - TEMP_MIN) / (TEMP_MAX - TEMP_MIN) * 100;
+      targetTempSlider.style.setProperty('--fill', pct + '%');
+      targetTempVal.textContent = value.toFixed(1);
     }
 
     function setPowerUI(isOn) {
@@ -178,9 +171,13 @@
         const d = JSON.parse(e.data);
         if (!dataReceived) { dataReceived = true; setControlsEnabled(true); }
         
-        if (typeof d.power === 'number') { 
-          const isOn = d.power === 1; 
-          if (powerToggle.checked !== isOn || powerStateText.textContent === 'Загрузка...') setPowerUI(isOn); 
+        if (typeof d.power === 'number') {
+          const isOn = d.power === 1;
+          setPowerUI(isOn);
+          if (isOn && d.failsafe === 1) {
+            powerStateText.textContent = 'АВАРИЙНЫЙ ОБДУВ';
+            powerStateText.style.color = 'var(--danger)';
+          }
         }
         
         // ПРОВЕРКА НАЛИЧИЯ ДАТЧИКА:
@@ -196,7 +193,7 @@
             if (tempVal.textContent !== '--') tempVal.textContent = '--';
           }
         }
-        
+
         if (typeof d.current_rpm === 'number') {
           const rpmStr = formatNum(d.current_rpm);
           if (rpmVal.textContent !== rpmStr) {
@@ -212,9 +209,10 @@
           }
         }
         
-        if (typeof d.temp_min === 'number' && typeof d.temp_max === 'number' && !tempDragging && Date.now() > tempIgnoreUpdatesUntil) {
-          if (tempMinSlider.value != Math.round(d.temp_min) || tempMaxSlider.value != Math.round(d.temp_max)) {
-            tempMinSlider.value = Math.round(d.temp_min); tempMaxSlider.value = Math.round(d.temp_max); updateTempSliderUI();
+        if (typeof d.target_temp === 'number' && !targetDragging && Date.now() > targetIgnoreUpdatesUntil) {
+          if (Number(targetTempSlider.value) !== d.target_temp) {
+            targetTempSlider.value = d.target_temp;
+            updateTargetTempUI();
           }
         }
       };
@@ -227,13 +225,14 @@
     powerToggle.addEventListener('change', () => { const isOn = powerToggle.checked; setPowerUI(isOn); if (ws && ws.readyState === WebSocket.OPEN) ws.send("power:" + (isOn ? "1" : "0")); });
     slider.addEventListener('input', () => { dragging = true; limitVal.textContent = formatNum(slider.value); updateFill(); });
     slider.addEventListener('change', () => { dragging = false; ignoreUpdatesUntil = Date.now() + 1000; if (ws && ws.readyState === WebSocket.OPEN) ws.send("rpm:" + slider.value); });
-    tempMinSlider.addEventListener('input', () => { let min = parseInt(tempMinSlider.value), max = parseInt(tempMaxSlider.value); if(min >= max - 1) tempMinSlider.value = max - 1; tempDragging = true; updateTempSliderUI(); });
-    tempMaxSlider.addEventListener('input', () => { let min = parseInt(tempMinSlider.value), max = parseInt(tempMaxSlider.value); if(max <= min + 1) tempMaxSlider.value = min + 1; tempDragging = true; updateTempSliderUI(); });
-    
-    function sendTempRange() { tempDragging = false; tempIgnoreUpdatesUntil = Date.now() + 1000; if (ws && ws.readyState === WebSocket.OPEN) ws.send("temp_range:" + tempMinSlider.value + "," + tempMaxSlider.value); }
-    tempMinSlider.addEventListener('change', sendTempRange); tempMaxSlider.addEventListener('change', sendTempRange);
+    targetTempSlider.addEventListener('input', () => { targetDragging = true; updateTargetTempUI(); });
+    targetTempSlider.addEventListener('change', () => {
+      targetDragging = false;
+      targetIgnoreUpdatesUntil = Date.now() + 1000;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send("target_temp:" + targetTempSlider.value);
+    });
 
-    updateFill(); updateTempSliderUI(); connectWS();
+    updateFill(); updateTargetTempUI(); connectWS();
   </script>
 </body>
 </html>

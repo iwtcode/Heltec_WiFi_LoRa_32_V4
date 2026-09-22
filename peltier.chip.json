@@ -1,0 +1,9 @@
+{
+  "name": "Peltier TEC1-12706",
+  "author": "Custom",
+  "pins": ["", "", "V+", "V-"],
+  "display": {
+    "width": 100,
+    "height": 100
+  }
+}
