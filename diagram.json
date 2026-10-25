@@ -16,12 +16,12 @@
       }
     },
     {
-      "type": "chip-motor610",
-      "id": "fan",
+      "type": "chip-mx1508",
+      "id": "drv",
       "top": 89,
       "left": 40,
       "attrs": {
-        "maxRpm": "45000",
+        "supplyV": "4.2",
         "smoothingMs": "250"
       }
     },
@@ -37,7 +37,7 @@
       "id": "airflow_label",
       "top": 65,
       "left": 45,
-      "attrs": { "text": "Fan airflow -> Peltier hot side" }
+      "attrs": { "text": "2 micro props (MX1508) -> Peltier hot side" }
     },
     {
       "type": "wokwi-text",
@@ -60,11 +60,15 @@
     [ "esp:GND.2", "bmp280:GND", "black", [ "h-70", "*", "h70" ] ],
     [ "esp:GND.2", "bmp280:SDO", "black", [ "h-75", "*", "h80" ] ],
 
-    [ "esp:3V3.1", "fan:V", "red", [ "h-80", "*", "h20" ] ],
-    [ "esp:GND.3", "fan:G", "black", [ "h-85", "*", "h20" ] ],
-    [ "esp:4", "fan:S", "orange", [ "h-90", "*", "h40" ] ],
+    [ "esp:3V3.1", "drv:VCC", "red", [ "h-80", "*", "h20" ] ],
+    [ "esp:GND.3", "drv:GND", "black", [ "h-85", "*", "h20" ] ],
+    [ "esp:4", "drv:IN1", "orange", [ "h-90", "*", "h40" ] ],
+    [ "esp:5", "drv:IN2", "gold", [ "h-95", "*", "h45" ] ],
+    [ "esp:6", "drv:IN3", "purple", [ "h-100", "*", "h50" ] ],
+    [ "esp:7", "drv:IN4", "gray", [ "h-105", "*", "h55" ] ],
 
     [ "esp:3V3.2", "peltier:V+", "red", [ "h-20", "*", "h20" ] ],
     [ "esp:GND.2", "peltier:V-", "black", [ "h-25", "*", "h25" ] ]
   ]
 }
+

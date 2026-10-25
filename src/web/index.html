@@ -112,8 +112,8 @@
         <div class="title">Лимит оборотов</div>
         <div><span class="val" id="limitVal">--</span><span class="unit"> RPM</span></div>
       </div>
-      <input type="range" id="rpmSlider" class="single" min="5000" max="45000" step="100" value="45000" disabled>
-      <div class="range-labels"><span>5 000</span><span>45 000</span></div>
+      <input type="range" id="rpmSlider" class="single" min="5000" max="46500" step="100" value="46500" disabled>
+      <div class="range-labels"><span>5 000</span><span>46 500</span></div>
     </div>
   </div>
 
@@ -125,7 +125,7 @@
     const statusText = document.getElementById('statusText'), themeToggle = document.getElementById('themeToggle');
     const targetTempSlider = document.getElementById('targetTempSlider'), targetTempVal = document.getElementById('targetTempVal');
 
-    const MIN = 5000, MAX = 45000, TEMP_MIN = 10, TEMP_MAX = 50;
+    const MIN = 5000, MAX = 46500, TEMP_MIN = 10, TEMP_MAX = 50;
     let dragging = false, ignoreUpdatesUntil = 0, targetDragging = false, targetIgnoreUpdatesUntil = 0;
     let ws = null, isDark = true, dataReceived = false;
 
@@ -236,3 +236,4 @@
   </script>
 </body>
 </html>
+

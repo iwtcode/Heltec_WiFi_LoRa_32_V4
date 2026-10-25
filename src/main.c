@@ -8,7 +8,7 @@
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 #include "bmp280.h"
-#include "motor610.h"
+#include "prop.h"
 #include "ssd1306.h"
 
 #include "nvs_flash.h"
@@ -32,7 +32,7 @@ static const char *TAG = "HELTEC_V4";
 #define MAX_STA_CONN       4
 
 #define RPM_LIMIT_MIN 5000.0f
-#define RPM_LIMIT_MAX 45000.0f
+#define RPM_LIMIT_MAX 46500.0f
 #define TARGET_TEMP_MIN 10.0f
 #define TARGET_TEMP_MAX 50.0f
 #define TARGET_TEMP_DEFAULT 25.0f
@@ -79,7 +79,7 @@ static void broadcast_ws_data_work(void *arg) {
     int len = snprintf(buf, sizeof(buf),
         "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"target_temp\":%.1f,"
         "\"power\":%d,\"bmp_ok\":%d,\"failsafe\":%d}",
-        motor610_max_rpm, g_current_rpm, g_current_temp, g_target_temp,
+        prop_max_rpm, g_current_rpm, g_current_temp, g_target_temp,
         g_fan_power ? 1 : 0, g_bmp_ok ? 1 : 0, g_failsafe_active ? 1 : 0);
 
     httpd_ws_frame_t ws_pkt = {
@@ -118,7 +118,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             int out_len = snprintf(out_buf, sizeof(out_buf),
                 "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"target_temp\":%.1f,"
                 "\"power\":%d,\"bmp_ok\":%d,\"failsafe\":%d}",
-                motor610_max_rpm, g_current_rpm, g_current_temp, g_target_temp,
+                prop_max_rpm, g_current_rpm, g_current_temp, g_target_temp,
                 g_fan_power ? 1 : 0, g_bmp_ok ? 1 : 0, g_failsafe_active ? 1 : 0);
             
             httpd_ws_frame_t ws_reply = {
@@ -132,7 +132,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             float new_rpm = atof((char*)ws_pkt.payload + 4);
             if (new_rpm < RPM_LIMIT_MIN) new_rpm = RPM_LIMIT_MIN;
             if (new_rpm > RPM_LIMIT_MAX) new_rpm = RPM_LIMIT_MAX;
-            motor610_max_rpm = new_rpm;
+            prop_max_rpm = new_rpm;
             httpd_queue_work(req->handle, broadcast_ws_data_work, NULL);
         }
         else if (strncmp((char*)ws_pkt.payload, "power:", 6) == 0) {
@@ -258,26 +258,24 @@ static void motor_task(void *pvParameters) {
         last_control_tick = control_tick;
 
         if (g_pid_reset_requested) {
-            motor610_pid_reset();
+            prop_pid_reset();
             g_pid_reset_requested = false;
         }
 
         if (!g_fan_power) {
-            motor610_pid_reset();
-            motor610_set_rpm(0.0f);
-            g_current_rpm = 0.0f;
+            prop_pid_reset();
+            g_current_rpm = prop_set_rpm(0.0f);
             g_failsafe_active = false;
         } else if (g_bmp_ok) {
-            float target_rpm = motor610_pid_update(g_current_temp, g_target_temp, dt_seconds);
-            motor610_set_rpm(target_rpm);
-            g_current_rpm = target_rpm;
+            float target_rpm = prop_pid_update(g_current_temp, g_target_temp, dt_seconds);
+            // prop_set_rpm возвращает фактические обороты (с минимумом запуска)
+            g_current_rpm = prop_set_rpm(target_rpm);
             g_failsafe_active = false;
         } else {
             // Без датчика невозможно замкнуть PID-контур. Пока Пельтье работает,
-            // безопаснее оставить максимальный обдув, чем остановить вентилятор.
-            motor610_pid_reset();
-            motor610_set_rpm(motor610_max_rpm);
-            g_current_rpm = motor610_max_rpm;
+            // безопаснее оставить максимальный обдув, чем остановить пропеллеры.
+            prop_pid_reset();
+            g_current_rpm = prop_set_rpm(prop_max_rpm);
             g_failsafe_active = true;
         }
 
@@ -286,7 +284,7 @@ static void motor_task(void *pvParameters) {
         
         bool changed = (diff_temp < -0.1f || diff_temp > 0.1f) ||
                        (diff_rpm < -20.0f || diff_rpm > 20.0f) ||
-                       (motor610_max_rpm != last_b_max) ||
+                       (prop_max_rpm != last_b_max) ||
                        (g_fan_power != last_b_power) ||
                        (g_target_temp != last_b_target) ||
                        (g_bmp_ok != last_b_bmp) ||
@@ -300,7 +298,7 @@ static void motor_task(void *pvParameters) {
         if (changed && interval_ok) {
             last_b_temp = g_current_temp;
             last_b_rpm = g_current_rpm;
-            last_b_max = motor610_max_rpm;
+            last_b_max = prop_max_rpm;
             last_b_target = g_target_temp;
             last_b_power = g_fan_power;
             last_b_bmp = g_bmp_ok;
@@ -355,9 +353,10 @@ void app_main(void)
     ssd1306_handle_t oled = ssd1306_create(I2C_MASTER_NUM, OLED_ADDR);
     if (oled != NULL) ssd1306_refresh_gram(oled);
 
-    motor610_init();
+    prop_init();
 
     xTaskCreate(bmp280_task, "bmp", 2048, NULL, 5, NULL);
     xTaskCreate(motor_task,  "mot", 2048, NULL, 5, NULL);
     xTaskCreate(oled_task,   "oled",2048, oled, 5, NULL);
 }
+

@@ -1,0 +1,19 @@
+{
+  "name": "MX1508 + 2 micromotors",
+  "author": "Custom",
+  "pins": ["VCC", "GND", "", "", "IN4", "IN3", "IN2", "IN1"],
+  "controls": [
+    {
+      "id": "supplyV",
+      "label": "Motor supply (V)",
+      "type": "range",
+      "min": 2,
+      "max": 10,
+      "step": 0.1
+    }
+  ],
+  "display": {
+    "width": 160,
+    "height": 80
+  }
+}

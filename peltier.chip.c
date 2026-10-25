@@ -129,3 +129,4 @@ static void render(chip_state_t *chip) {
   buffer_write(chip->framebuffer, 0, chip->pixels,
                (uint32_t)((size_t)chip->width * chip->height * 4));
 }
+

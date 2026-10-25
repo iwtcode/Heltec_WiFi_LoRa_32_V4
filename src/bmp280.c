@@ -124,3 +124,4 @@ esp_err_t bmp280_read_temperature(i2c_port_t i2c_num, float *temperature_c)
     *temperature_c = t_centi / 100.0f;
     return ESP_OK;
 }
+
