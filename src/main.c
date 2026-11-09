@@ -8,6 +8,7 @@
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 #include "bmp280.h"
+#include "board_config.h"
 #include "motor610.h"
 #include "ssd1306.h"
 
@@ -19,13 +20,10 @@
 
 static const char *TAG = "HELTEC_V4";
 
-#define I2C_MASTER_SDA_IO 17
-#define I2C_MASTER_SCL_IO 18
+// Пины (SDA/SCL, OLED_RST, VEXT_PIN, ШИМ) зависят от чипа — см. board_config.h
 #define I2C_MASTER_NUM 0
 #define I2C_MASTER_FREQ_HZ 400000
 #define OLED_ADDR 0x3C
-#define VEXT_PIN GPIO_NUM_36
-#define OLED_RST GPIO_NUM_21
 
 #define WIFI_AP_SSID       "Heltec_ESP32"
 #define WIFI_AP_PASS       "12345678"
@@ -195,6 +193,7 @@ void wifi_ap_init_and_start_webserver(void) {
     config.max_open_sockets = 10;
     config.lru_purge_enable = true;
     config.max_uri_handlers = 8;
+    config.stack_size = 6144; // запас под snprintf(%f) в обработчиках WebSocket
     
     if (httpd_start(&g_server, &config) == ESP_OK) {
         httpd_uri_t uri_get = { .uri = "/", .method = HTTP_GET, .handler = get_handler };
@@ -321,7 +320,11 @@ static void oled_task(void *pvParameters) {
 }
 
 void app_main(void)
-{    
+{
+    ESP_LOGI(TAG, "Чип: %s | SDA=%d SCL=%d RST=%d VEXT=%d PWM=%d",
+             BOARD_TARGET_NAME, (int)I2C_MASTER_SDA_IO, (int)I2C_MASTER_SCL_IO,
+             (int)OLED_RST, (int)VEXT_PIN, (int)MOTOR610_PWM_PIN);
+
     heltec_board_init();
     wifi_ap_init_and_start_webserver();
     i2c_master_init();
@@ -331,7 +334,7 @@ void app_main(void)
 
     motor610_init();
 
-    xTaskCreate(bmp280_task, "bmp", 2048, NULL, 5, NULL);
-    xTaskCreate(motor_task,  "mot", 2048, NULL, 5, NULL);
-    xTaskCreate(oled_task,   "oled",2048, oled, 5, NULL);
-}
+    xTaskCreate(bmp280_task, "bmp", 4096, NULL, 5, NULL);
+    xTaskCreate(motor_task,  "mot", 4096, NULL, 5, NULL);
+    xTaskCreate(oled_task,   "oled", 4096, oled, 5, NULL);
+}

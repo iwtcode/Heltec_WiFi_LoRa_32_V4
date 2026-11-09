@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-ESP32--S3-blue" />
+  <img alt="Platform" src="https://img.shields.io/badge/platform-ESP32--S3%20%7C%20ESP32-blue" />
   <img alt="Framework" src="https://img.shields.io/badge/framework-ESP--IDF-red" />
   <img alt="Build" src="https://img.shields.io/badge/build-PlatformIO-orange" />
   <img alt="Sim" src="https://img.shields.io/badge/simulation-Wokwi-9cf" />
@@ -41,15 +41,17 @@
 
 ## 🔌 Схема подключения
 
-| Сигнал | Pin ESP32-S3 | OLED SSD1306 | BMP280 | motor610 |
-|--------|:---:|:---:|:---:|:---:|
-| SDA    | GPIO17 | SDA | SDA | — |
-| SCL    | GPIO18 | SCL | SCL | — |
-| 3V3    | 3V3    | VCC | VCC, CSB | V |
-| GND    | GND    | GND | GND, SDO | G |
-| Reset  | GPIO21 | RST | — | — |
-| VEXT   | GPIO36 | питание платы | — | — |
-| PWM | GPIO4 | — | — | S |
+| Сигнал | ESP32-S3 (по умолчанию) | ESP32 (Heltec V2) | OLED SSD1306 | BMP280 | motor610 |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| SDA    | GPIO17 | GPIO4  | SDA | SDA | — |
+| SCL    | GPIO18 | GPIO15 | SCL | SCL | — |
+| 3V3    | 3V3    | 3V3    | VCC | VCC, CSB | V |
+| GND    | GND    | GND    | GND | GND, SDO | G |
+| Reset  | GPIO21 | GPIO16 | RST | — | — |
+| VEXT   | GPIO36 | GPIO21 | питание платы | — | — |
+| PWM    | GPIO4  | GPIO13 | — | — | S |
+
+> Пины выбираются автоматически по целевому чипу в [`src/board_config.h`](src/board_config.h). На классическом ESP32 GPIO34–39 работают только как входы, поэтому пины S3 (например, GPIO36 для VEXT) там использовать нельзя. Любой пин можно переопределить через `build_flags`, например `-DMOTOR610_PWM_PIN=GPIO_NUM_25`.
 
 > `SDO → GND` задаёт I2C-адрес BMP280 `0x76`; при `SDO → VCC` адрес будет `0x77`
 
@@ -147,11 +149,18 @@ wokwi-cli chip compile motor610.chip.c -o motor610.chip.wasm
 
 ## 3. Сборка и загрузка
 
-Финальный шаг — собрать и загрузить проект
+В `platformio.ini` два окружения. Прошивка у каждого чипа своя, поэтому окружение должно совпадать с чипом на плате:
 
-**`Build`** → **`Upload`**
+| Окружение | Чип | Команда |
+|---|---|---|
+| `heltec_wifi_lora_32_V3` (по умолчанию) | ESP32-S3 | `pio run -t upload` |
+| `esp32` | классический ESP32 | `pio run -e esp32 -t upload` |
 
-> Смотреть логи можно через `Serial Monitor` (Ctrl+Alt+S)
+В VS Code окружение переключается в нижней строке состояния PlatformIO (`Switch PlatformIO Project Environment`).
+
+Прошивка рассчитана на **флеш 4 МБ** (подходит и для плат с 8 МБ): таблица разделов в [`partitions.csv`](partitions.csv) заканчивается ровно на `0x400000`.
+
+> Смотреть логи можно через `Serial Monitor` (Ctrl+Alt+S). При старте в лог выводится выбранный чип и используемые пины.
 
 ✅ Готово
 
@@ -159,12 +168,16 @@ wokwi-cli chip compile motor610.chip.c -o motor610.chip.wasm
 
 ## 🛠️ Возникают ошибки?
 
+**`This chip is ESP32, not ESP32-S3`** — на плате классический ESP32, а собран образ для S3. Загружайте окружением `esp32`: `pio run -e esp32 -t upload`. Обратная ситуация (`This chip is ESP32-S3, not ESP32`) решается окружением по умолчанию.
+
 Удалите артефакты сборки и повторите сборку заново
 
 - `.pio`
 - `.vscode`
 - `managed_components`
 - `sdkconfig.heltec_wifi_lora_32_V3`
+- `sdkconfig.esp32`
+- `dependencies.lock`
 
 ```bash
 pio run -t clean

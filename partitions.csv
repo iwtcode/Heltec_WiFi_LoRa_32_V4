@@ -1,5 +1,7 @@
-# Name,   Type, SubType, Offset,  Size, Flags
-nvs,      data, nvs,     ,        0x4000,
-otadata,  data, ota,     ,        0x2000,
-phy_init, data, phy,     ,        0x1000,
-factory,  app,  factory, ,        4M,
+# Таблица разделов для флеша 4 МБ (0x400000). Одинакова для ESP32 и ESP32-S3.
+# Таблица лежит по смещению 0x8000, первый раздел начинается с 0x9000.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xD000,   0x2000,
+phy_init, data, phy,     0xF000,   0x1000,
+factory,  app,  factory, 0x10000,  0x3F0000,

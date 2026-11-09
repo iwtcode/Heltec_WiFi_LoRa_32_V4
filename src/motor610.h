@@ -3,13 +3,14 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "board_config.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // --- Вентилятор motor610 (coreless motor fan), см. motor610.md ---
-#define MOTOR610_PWM_PIN      GPIO_NUM_4
+// MOTOR610_PWM_PIN задан в board_config.h (зависит от чипа)
 #define MOTOR610_LEDC_TIMER   LEDC_TIMER_0
 #define MOTOR610_LEDC_MODE    LEDC_LOW_SPEED_MODE
 #define MOTOR610_LEDC_CHANNEL LEDC_CHANNEL_0
@@ -44,4 +45,4 @@ void motor610_set_rpm(float target_rpm);
 }
 #endif
 
-#endif // MOTOR610_H
+#endif // MOTOR610_H
