@@ -9,7 +9,7 @@
  *   esp32                   -> классический ESP32
  *
  * Любой пин можно переопределить без правки кода, например в platformio.ini:
- *   build_flags = -DI2C_MASTER_SDA_IO=GPIO_NUM_21 -DMOTOR610_PWM_PIN=GPIO_NUM_25
+ *   build_flags = -DI2C_MASTER_SDA_IO=GPIO_NUM_21 -DDRV8837_IN1_PIN=GPIO_NUM_25
  */
 
 #include "sdkconfig.h"
@@ -31,8 +31,14 @@
 #ifndef VEXT_PIN
 #define VEXT_PIN          GPIO_NUM_36   /* питание периферии, LOW = включено */
 #endif
-#ifndef MOTOR610_PWM_PIN
-#define MOTOR610_PWM_PIN  GPIO_NUM_4    /* ШИМ вентилятора */
+#ifndef DRV8837_IN1_PIN
+#define DRV8837_IN1_PIN    GPIO_NUM_4    /* DRV8837 IN1 (PWM) */
+#endif
+#ifndef DRV8837_IN2_PIN
+#define DRV8837_IN2_PIN    GPIO_NUM_5    /* DRV8837 IN2 (держим LOW) */
+#endif
+#ifndef DRV8837_NSLEEP_PIN
+#define DRV8837_NSLEEP_PIN GPIO_NUM_6    /* DRV8837 nSLEEP, HIGH = активен */
 #endif
 
 #elif CONFIG_IDF_TARGET_ESP32
@@ -53,8 +59,14 @@
 #ifndef VEXT_PIN
 #define VEXT_PIN          GPIO_NUM_21   /* LOW = включено */
 #endif
-#ifndef MOTOR610_PWM_PIN
-#define MOTOR610_PWM_PIN  GPIO_NUM_13   /* свободный пин, не strapping и не LoRa */
+#ifndef DRV8837_IN1_PIN
+#define DRV8837_IN1_PIN    GPIO_NUM_13   /* свободный пин, не strapping и не LoRa */
+#endif
+#ifndef DRV8837_IN2_PIN
+#define DRV8837_IN2_PIN    GPIO_NUM_17
+#endif
+#ifndef DRV8837_NSLEEP_PIN
+#define DRV8837_NSLEEP_PIN GPIO_NUM_23
 #endif
 
 #else

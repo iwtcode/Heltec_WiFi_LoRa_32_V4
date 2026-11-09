@@ -9,7 +9,7 @@
 #include "driver/gpio.h"
 #include "bmp280.h"
 #include "board_config.h"
-#include "motor610.h"
+#include "micro_motor.h"
 #include "ssd1306.h"
 
 #include "nvs_flash.h"
@@ -71,7 +71,7 @@ static void broadcast_ws_data_work(void *arg) {
     // ДОБАВЛЕНО: передача параметра bmp_ok
     int len = snprintf(buf, sizeof(buf),
         "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f,\"bmp_ok\":%d}",
-        motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max, g_bmp_ok ? 1 : 0);
+        micro_motor_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, micro_motor_temp_min, micro_motor_temp_max, g_bmp_ok ? 1 : 0);
 
     httpd_ws_frame_t ws_pkt = {
         .payload = (uint8_t*)buf,
@@ -109,7 +109,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             // ДОБАВЛЕНО: передача параметра bmp_ok при инициализации
             int out_len = snprintf(out_buf, sizeof(out_buf),
                 "{\"max_rpm\":%.0f,\"current_rpm\":%.0f,\"temp\":%.1f,\"power\":%d,\"temp_min\":%.1f,\"temp_max\":%.1f,\"bmp_ok\":%d}",
-                motor610_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, motor610_temp_min, motor610_temp_max, g_bmp_ok ? 1 : 0);
+                micro_motor_max_rpm, g_current_rpm, g_current_temp, g_fan_power ? 1 : 0, micro_motor_temp_min, micro_motor_temp_max, g_bmp_ok ? 1 : 0);
             
             httpd_ws_frame_t ws_reply = {
                 .payload = (uint8_t*)out_buf,
@@ -122,7 +122,8 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             float new_rpm = atof((char*)ws_pkt.payload + 4);
             if (new_rpm < RPM_LIMIT_MIN) new_rpm = RPM_LIMIT_MIN;
             if (new_rpm > RPM_LIMIT_MAX) new_rpm = RPM_LIMIT_MAX;
-            motor610_max_rpm = new_rpm;
+            if (new_rpm > micro_motor_physical_max_rpm()) new_rpm = micro_motor_physical_max_rpm();
+            micro_motor_max_rpm = new_rpm;
             httpd_queue_work(req->handle, broadcast_ws_data_work, NULL);
         }
         else if (strncmp((char*)ws_pkt.payload, "power:", 6) == 0) {
@@ -134,8 +135,8 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             float t_min, t_max;
             if (sscanf((char*)ws_pkt.payload + 11, "%f,%f", &t_min, &t_max) == 2) {
                 if (t_min >= t_max) t_min = t_max - 1.0f;
-                motor610_temp_min = t_min;
-                motor610_temp_max = t_max;
+                micro_motor_temp_min = t_min;
+                micro_motor_temp_max = t_max;
                 httpd_queue_work(req->handle, broadcast_ws_data_work, NULL);
             }
         }
@@ -244,14 +245,14 @@ static void motor_task(void *pvParameters) {
 
     while (1) {
         if (g_bmp_ok) {
-            float target_rpm = motor610_target_rpm_for_temp(g_current_temp);
+            float target_rpm = micro_motor_target_rpm_for_temp(g_current_temp);
             if (!g_fan_power) target_rpm = 0.0f;
             
-            motor610_set_rpm(target_rpm);
+            micro_motor_set_rpm(target_rpm);
             g_current_rpm = target_rpm;
         } else {
             // Если BMP отключен, просто выключаем вентилятор
-            motor610_set_rpm(0.0f);
+            micro_motor_set_rpm(0.0f);
             g_current_rpm = 0.0f;
         }
 
@@ -260,10 +261,10 @@ static void motor_task(void *pvParameters) {
         
         bool changed = (diff_temp < -0.1f || diff_temp > 0.1f) ||
                        (diff_rpm < -20.0f || diff_rpm > 20.0f) ||
-                       (motor610_max_rpm != last_b_max) ||
+                       (micro_motor_max_rpm != last_b_max) ||
                        (g_fan_power != last_b_power) ||
-                       (motor610_temp_min != last_b_tmin) ||
-                       (motor610_temp_max != last_b_tmax) ||
+                       (micro_motor_temp_min != last_b_tmin) ||
+                       (micro_motor_temp_max != last_b_tmax) ||
                        (g_bmp_ok != last_b_bmp); // Транслировать при обрыве/восстановлении BMP
                        
         TickType_t now = xTaskGetTickCount();
@@ -274,9 +275,9 @@ static void motor_task(void *pvParameters) {
         if (changed && interval_ok) {
             last_b_temp = g_current_temp;
             last_b_rpm = g_current_rpm;
-            last_b_max = motor610_max_rpm;
-            last_b_tmin = motor610_temp_min;
-            last_b_tmax = motor610_temp_max;
+            last_b_max = micro_motor_max_rpm;
+            last_b_tmin = micro_motor_temp_min;
+            last_b_tmax = micro_motor_temp_max;
             last_b_power = g_fan_power;
             last_b_bmp = g_bmp_ok;
             last_broadcast = now;
@@ -305,7 +306,7 @@ static void oled_task(void *pvParameters) {
             
             // Интерфейс не падает, а продолжает рисовать остальные параметры
             snprintf(r_str, sizeof(r_str), "Fan: %.0f", g_current_rpm);
-            snprintf(m_str, sizeof(m_str), "Max: %.0f", motor610_max_rpm);
+            snprintf(m_str, sizeof(m_str), "Max: %.0f", micro_motor_max_rpm);
             snprintf(p_str, sizeof(p_str), "PWR: %s", g_fan_power ? "ON" : "OFF");
             
             ssd1306_draw_string(oled, 0, 0, (const uint8_t *)t_str, 16, 1);
@@ -323,7 +324,7 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Чип: %s | SDA=%d SCL=%d RST=%d VEXT=%d PWM=%d",
              BOARD_TARGET_NAME, (int)I2C_MASTER_SDA_IO, (int)I2C_MASTER_SCL_IO,
-             (int)OLED_RST, (int)VEXT_PIN, (int)MOTOR610_PWM_PIN);
+             (int)OLED_RST, (int)VEXT_PIN, (int)DRV8837_IN1_PIN);
 
     heltec_board_init();
     wifi_ap_init_and_start_webserver();
@@ -332,9 +333,9 @@ void app_main(void)
     ssd1306_handle_t oled = ssd1306_create(I2C_MASTER_NUM, OLED_ADDR);
     if (oled != NULL) ssd1306_refresh_gram(oled);
 
-    motor610_init();
+    micro_motor_init();
 
     xTaskCreate(bmp280_task, "bmp", 4096, NULL, 5, NULL);
     xTaskCreate(motor_task,  "mot", 4096, NULL, 5, NULL);
     xTaskCreate(oled_task,   "oled", 4096, oled, 5, NULL);
-}
+}
